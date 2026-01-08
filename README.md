@@ -138,6 +138,220 @@ Core governance logic is independent of the identity provider.
 
 ---
 
+Development Log / 开发日志（中英双语）
+v0.1.0 — Infrastructure & Backend Skeleton (Current)
+
+This milestone establishes a reproducible, auditable development baseline for IS-CGP.
+本阶段目标是建立一个可重复启动、可审计、可演进的工程基线。
+
+🧱 Infrastructure & Environment
+
+基础设施与开发环境
+
+EN
+
+Docker-based local development environment is fully set up.
+
+Services included:
+
+PostgreSQL 16 (metadata & governance state)
+
+Redis 7 (cache placeholder)
+
+FastAPI backend service
+
+One-command startup via docker compose.
+
+Health check endpoint verifies DB & Redis connectivity.
+
+中文
+
+已完成基于 Docker 的本地开发环境搭建。
+
+当前包含服务：
+
+PostgreSQL 16（治理元数据与状态存储）
+
+Redis 7（缓存占位，后续用于多级缓存治理）
+
+FastAPI 后端服务
+
+支持通过 docker compose 一键启动。
+
+提供 /healthz 接口用于验证数据库与 Redis 连通性。
+
+🗄️ Database & Migration System
+
+数据库与迁移系统
+
+EN
+
+Alembic migration system is fully wired to DATABASE_URL.
+
+Database schema initialized and versioned.
+
+Current core tables:
+
+projects — logical isolation unit
+
+sessions — conversation sessions under projects
+
+users — reserved for upcoming authentication
+
+alembic_version
+
+Migrations can be executed and inspected inside containers.
+
+中文
+
+已完整接入 Alembic 数据库迁移系统，并绑定 DATABASE_URL。
+
+数据库结构已初始化并纳入版本控制。
+
+当前核心数据表包括：
+
+projects —— 项目级隔离单元
+
+sessions —— 项目下的会话实例
+
+users —— 为后续身份认证预留
+
+alembic_version
+
+支持在容器内执行与检查迁移状态。
+
+🌐 Backend API (FastAPI)
+
+后端 API（FastAPI）
+
+EN
+
+FastAPI application skeleton is stabilized.
+
+OpenAPI schema and Swagger UI are automatically generated.
+
+Core API endpoints implemented:
+
+Projects
+
+GET /v1/projects — list recent projects (debug-friendly)
+
+POST /v1/projects — idempotent project creation by name
+
+Sessions
+
+GET /v1/sessions — list recent sessions
+
+POST /v1/sessions — create session under an existing project
+
+UUID handling and response serialization are normalized for API safety.
+
+中文
+
+FastAPI 后端骨架已稳定成型。
+
+自动生成 OpenAPI 文档与 Swagger UI。
+
+已实现的核心接口包括：
+
+项目（Projects）
+
+GET /v1/projects —— 列出最近项目（便于调试）
+
+POST /v1/projects —— 按名称幂等创建项目
+
+会话（Sessions）
+
+GET /v1/sessions —— 列出最近会话
+
+POST /v1/sessions —— 在指定项目下创建会话
+
+已对 UUID 与返回结果进行显式序列化，避免隐式类型问题。
+
+🔍 Observability & Debugging
+
+可观测性与调试支持
+
+EN
+
+OpenAPI schema (/openapi.json) verified to reflect runtime routes.
+
+Explicit DB inspection workflows documented and tested.
+
+Backend and database consistency verified across container restarts.
+
+中文
+
+已验证 /openapi.json 与运行时路由完全一致。
+
+明确了后端 / 数据库双侧调试方式。
+
+在多次容器重建后验证数据与行为一致性。
+
+📐 Architectural Decisions (So Far)
+
+当前阶段的关键设计决策
+
+EN
+
+IS-CGP is implemented as a governance middleware, not an inference engine.
+
+No ORM coupling at this stage; SQL is kept explicit for audit clarity.
+
+Backend is identity-agnostic by design; authentication is layered, not baked in.
+
+中文
+
+IS-CGP 明确定位为治理中间层，而非推理引擎。
+
+当前阶段避免 ORM 黑箱，采用显式 SQL 以保证审计可读性。
+
+后端在架构上与身份源解耦，认证作为可插拔能力引入。
+
+⚠️ Notes & Limitations
+
+注意事项与当前限制
+
+EN
+
+Authentication & authorization are not yet enforced (planned next).
+
+Redis is not yet used for actual cache governance.
+
+Admin Console and UI are not implemented at this stage.
+
+中文
+
+当前尚未引入身份认证与权限控制（下一阶段重点）。
+
+Redis 尚未参与实际缓存治理逻辑。
+
+治理控制台与 UI 尚未实现。
+
+🔜 Next Milestone (v0.2 Preview)
+
+下一阶段预告（v0.2）
+
+EN
+
+User authentication (JWT-based)
+
+Project-level RBAC
+
+Message model and chat stub
+
+Governance-oriented context assembly skeleton
+
+中文
+
+用户认证（JWT）
+
+项目级 RBAC 权限控制
+
+消息模型与基础聊天接口
+
+面向治理的上下文拼装骨架
+
 ## Roadmap (High-level) / 路线图（简要）
 
 - **v0.1**  
