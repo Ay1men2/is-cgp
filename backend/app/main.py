@@ -5,6 +5,9 @@ from .deps import get_engine, get_redis
 
 app = FastAPI(title="IS-CPG Backend", version="0.1.0")
 
+from .api import router as v1_router
+app.include_router(v1_router)
+
 @app.get("/healthz")
 def healthz():
     # DB check
