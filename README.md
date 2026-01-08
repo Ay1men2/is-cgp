@@ -11,7 +11,7 @@
 
 **IS-CGP（智安对话治理平台）** 是一个面向 **内网私有化部署场景** 的 **大模型会话治理中间层（Open Core）**。
 
-本项目以“不侵入底层推理引擎”为前提，围绕 **会话隔离、访问控制、可审计上下文拼装与缓存治理** 等核心问题，为研究所、政务、医疗及其他高合规要求单位提供一套 **可落地、可审计、可演进** 的大模型治理能力。
+本项目以“不侵入底层推理引擎”为前提，围绕 **会话隔离、访问控制、可审计上下文拼装与缓存治理** 等核心问题，为政务、医疗及其他高合规要求单位提供一套 **可落地、可审计、可演进** 的大模型治理能力。
 
 > **EN**
 > IS-CGP is an open-core governance middleware for secure, auditable, and controllable LLM conversations in on-premise / private-network environments.
