@@ -1,6 +1,6 @@
 # IS-CGP（Intelligent Secure Conversation Governance Platform）
 
-IS-CPG 是一套面向 **内网 / 私有化大模型部署** 的对话治理中间层，
+IS-CGP 是一套面向 **内网 / 私有化大模型部署** 的对话治理中间层，
 用于解决多角色、多项目、多安全等级场景下的大模型 **上下文拼装、权限控制、审计与缓存治理** 问题。
 
 ## 核心目标（MVP）
