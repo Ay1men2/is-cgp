@@ -243,9 +243,4 @@ Maintained by **Ay1men2** and contributors.
 
 ---
 
-## 快速开始（开发态）
-
-> TODO：docker-compose + backend 启动说明
-
----
 
