@@ -6,5 +6,6 @@ class Settings(BaseSettings):
 
     database_url: str = Field(validation_alias="DATABASE_URL")
     redis_url: str = Field(validation_alias="REDIS_URL")
+    rlm_glimpse_ttl_sec: int = Field(default=3600, validation_alias="RLM_GLIMPSE_TTL_SEC")
 
 settings = Settings()
