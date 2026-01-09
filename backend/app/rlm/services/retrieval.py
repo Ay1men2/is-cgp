@@ -3,8 +3,6 @@ from __future__ import annotations
 import re
 from typing import Any, Iterable
 
-import re
-
 from app.rlm.adapters.repos_sql import RetrievalOptions, RlmRepoSQL
 from app.rlm.domain.models import CandidateIndex
 
