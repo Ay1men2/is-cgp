@@ -9,6 +9,7 @@ class Candidate(BaseModel):
     scope: str
     type: str
     title: Optional[str] = None
+    content_hash: str
 
     pinned: bool = False
     weight: float = 1.0
