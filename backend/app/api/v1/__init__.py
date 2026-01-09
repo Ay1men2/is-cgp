@@ -1,10 +1,16 @@
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import text
 
-from .deps import get_engine
-from .schemas import ProjectCreate, ProjectOut, SessionCreate, SessionOut
+from app.deps import get_engine
+from app.schemas import ProjectCreate, ProjectOut, SessionCreate, SessionOut
 
-router = APIRouter(prefix="/v1", tags=["v1"])
+router = APIRouter(tags=["v1"])
+
+from app.api.v1.rlm import router as rlm_router
+router.include_router(rlm_router)
+
+
+
 
 
 @router.get("/sessions")
@@ -104,4 +110,5 @@ def create_session(payload: SessionCreate):
         d["id"] = str(d["id"])
         d["project_id"] = str(d["project_id"])
         return d
+
 
