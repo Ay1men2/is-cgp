@@ -1,12 +1,46 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 from dataclasses import dataclass
 
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from app.rlm.domain.models import Candidate, CandidateIndex
+
+
+class ArtifactRepo:
+    """
+    访问 artifacts 表的轻量 SQL 仓库。
+    """
+
+    def __init__(self, engine: Engine):
+        self.engine = engine
+
+    def get_content(self, artifact_id: str) -> dict[str, Any]:
+        sql = text(
+            """
+            SELECT
+                id::text AS artifact_id,
+                content,
+                content_hash,
+                metadata
+            FROM artifacts
+            WHERE id = :artifact_id
+            LIMIT 1
+            """
+        )
+        with self.engine.connect() as conn:
+            row = conn.execute(sql, {"artifact_id": artifact_id}).mappings().first()
+            if not row:
+                raise ValueError(f"artifact_id not found: {artifact_id}")
+            return {
+                "artifact_id": row["artifact_id"],
+                "content": row["content"],
+                "content_hash": row["content_hash"],
+                "metadata": row.get("metadata") or {},
+            }
 
 
 @dataclass(frozen=True)
