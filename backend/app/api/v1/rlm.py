@@ -23,7 +23,9 @@ class RlmAssembleReq(BaseModel):
 class RlmAssembleResp(BaseModel):
     run_id: str
     status: str = "ok"
-    candidate_index: dict[str, Any]
+    assembled_context: dict[str, Any] = Field(default_factory=dict)
+    rounds_summary: list[dict[str, Any]] = Field(default_factory=list)
+    rendered_prompt: Optional[str] = None
 
 
 @router.post("/assemble", response_model=RlmAssembleResp)
@@ -35,7 +37,7 @@ def rlm_assemble(req: RlmAssembleReq, engine: Engine = Depends(get_engine)) -> R
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    # v0：assembled_context 先不做，先把环境状态落库
+    # v0：assembled_context/rounds_summary 先不做，先把环境状态落库
     run_id = repo.insert_run(
         session_id=req.session_id,
         query=req.query,
@@ -46,5 +48,7 @@ def rlm_assemble(req: RlmAssembleReq, engine: Engine = Depends(get_engine)) -> R
     return RlmAssembleResp(
         run_id=run_id,
         status="ok",
-        candidate_index=idx.model_dump(),
+        assembled_context={},
+        rounds_summary=[],
+        rendered_prompt=None,
     )
