@@ -1,6 +1,5 @@
 ---
 
-```markdown
 # IS-CGP — 智安对话治理平台
 
 **Intelligent Secure Conversation Governance Platform**
