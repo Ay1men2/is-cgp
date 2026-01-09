@@ -14,6 +14,7 @@ class RetrievalOptions:
     include_global: bool = True
     top_k: int = 20
     preview_chars: int = 240
+    types: list[str] | None = None
 
 
 class RlmRepoSQL:
@@ -50,6 +51,7 @@ class RlmRepoSQL:
         self,
         session_id: str,
         query: str,
+        tokens: list[str],
         opt: RetrievalOptions,
     ) -> CandidateIndex:
         project_id = self._get_project_id_by_session(session_id)
@@ -58,12 +60,6 @@ class RlmRepoSQL:
         scopes: list[str] = ["session", "project"]
         if opt.include_global:
             scopes.append("global")
-
-        # v0 最轻量 token：按空格切；最多 8 个，防止 OR/unnest 爆炸
-        tokens = [t for t in query.replace("\n", " ").split(" ") if t.strip()]
-        tokens = tokens[:8]
-        if not tokens:
-            tokens = [query]
 
         # 关键点：
         # 1) 不要用 :session_id::uuid / :project_id::uuid
@@ -80,6 +76,7 @@ class RlmRepoSQL:
                 weight,
                 source,
                 token_estimate,
+                content_hash,
                 left(content, :preview_chars) AS content_preview,
 
                 (
@@ -92,6 +89,7 @@ class RlmRepoSQL:
             WHERE status = 'active'
               AND project_id = :project_id
               AND scope = ANY(:scopes)
+              AND (:types IS NULL OR type = ANY(:types))
               AND (
                     (scope = 'session' AND session_id = :session_id)
                  OR (scope <> 'session')
@@ -111,6 +109,7 @@ class RlmRepoSQL:
                     "tokens": tokens,
                     "top_k": opt.top_k,
                     "preview_chars": opt.preview_chars,
+                    "types": opt.types,
                 },
             ).mappings().all()
 
@@ -132,6 +131,7 @@ class RlmRepoSQL:
                     weight=weight,
                     source=r.get("source") or "manual",
                     content_preview=r.get("content_preview") or "",
+                    content_hash=r.get("content_hash"),
                     token_estimate=r.get("token_estimate"),
                     base_score=base_score,
                     score_breakdown={
