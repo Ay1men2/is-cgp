@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Optional
 from pydantic import BaseModel, Field
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.deps import get_engine  # 你已有：返回 Engine（有缓存）
 from sqlalchemy.engine import Engine
@@ -30,7 +30,10 @@ class RlmAssembleResp(BaseModel):
 def rlm_assemble(req: RlmAssembleReq, engine: Engine = Depends(get_engine)) -> RlmAssembleResp:
     repo = RlmRepoSQL(engine)
 
-    idx = build_candidate_index(repo, req.session_id, req.query, req.options)
+    try:
+        idx = build_candidate_index(repo, req.session_id, req.query, req.options)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     # v0：assembled_context 先不做，先把环境状态落库
     run_id = repo.insert_run(
@@ -45,4 +48,3 @@ def rlm_assemble(req: RlmAssembleReq, engine: Engine = Depends(get_engine)) -> R
         status="ok",
         candidate_index=idx.model_dump(),
     )
-
