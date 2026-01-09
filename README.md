@@ -7,14 +7,20 @@
 
 ---
 
-## 项目简介
+## 项目定位（Positioning）
 
-**IS-CGP（智安对话治理平台）** 是一个面向 **内网私有化部署场景** 的 **大模型会话治理中间层（Open Core）**。
+**IS-CGP（智安对话治理平台）** 是一个面向 **内网 / 私有化部署场景** 的
+**大模型会话治理中间层（Governance Middleware, Open Core）**。
 
-本项目以“不侵入底层推理引擎”为前提，围绕 **会话隔离、访问控制、可审计上下文拼装与缓存治理** 等核心问题，为政务、医疗及其他高合规要求单位提供一套 **可落地、可审计、可演进** 的大模型治理能力。
+本项目不追求“平台功能完备”，而是聚焦于一个核心问题：
+
+> **当大模型被真实组织长期、多角色、多项目使用时，
+> 我们如何让“上下文进入模型的过程”变得可治理、可解释、可审计？**
+
+IS-CGP 以 **不侵入底层推理引擎** 为前提，为现有聊天系统与模型服务提供统一的治理能力，而非替代它们。
 
 > **EN**
-> IS-CGP is an open-core governance middleware for secure, auditable, and controllable LLM conversations in on-premise / private-network environments.
+> IS-CGP is an open-core governance middleware that focuses on making LLM context assembly auditable, controllable, and reproducible in on-premise environments.
 
 ---
 
@@ -22,21 +28,32 @@
 
 ### 中文
 
-随着大模型在 **政务、医疗等内网环境** 中逐步落地，其使用形态正从早期的“个人试验”转向“**多项目、多部门、多角色共享使用**”。
+随着大模型在 **政务、医疗、科研机构等内网环境** 中逐步落地，其使用形态正在从“个人试验”演化为：
+
+> **多项目 / 多部门 / 多角色的长期共享基础设施**
 
 在这一阶段，系统瓶颈不再主要体现在模型推理性能或算力利用率，而是集中暴露在 **治理层面**：
 
-* 多项目、多部门并行使用下，**上下文与数据隔离不足**；
-* 内部制度文件、科研资料、源代码等资产，**难以按角色与保密等级精细控制**；
-* 模型输出缺乏清晰的 **可审计、可解释路径**；
-* 缓存与加速机制在权限、策略或知识变更后，**缺乏统一、可靠的失效机制**。
+* 多项目并行使用下，**上下文与数据隔离不足**
+* 内部制度文件、科研资料、源代码等资产
+  **难以按角色与保密等级进行精细化控制**
+* 模型输出结果缺乏清晰的 **可审计、可解释路径**
+* 检索与缓存机制在策略或权限变化后
+  **缺乏统一、可靠的失效与追责机制**
+* 在 **长上下文（Long Context）** 场景下：
 
-现有大模型部署方案普遍聚焦推理效率，但 **缺乏独立、系统化的治理中间层**。
-IS-CGP 正是在这一背景下提出，目标是补齐内网大模型基础设施中的“治理能力短板”。
+  * “给多少上下文”
+  * “给哪些上下文”
+  * “出问题责任如何界定”
+    往往没有系统化答案
+
+现有方案多聚焦于推理效率或应用层能力，而 **缺乏一个独立、工程化的治理中间层**。
+
+IS-CGP 正是在这一背景下提出，用于补齐 **内网大模型基础设施中的治理能力短板**。
 
 ### EN (Brief)
 
-As LLM usage shifts to multi-project and multi-role shared deployments, governance—not inference performance—becomes the primary bottleneck. IS-CGP addresses isolation, access control, auditability, and cache consistency in on-prem environments.
+As LLMs become shared infrastructure, governance—not inference—becomes the core challenge. IS-CGP focuses on auditable context control and long-context governance in on-prem environments.
 
 ---
 
@@ -44,33 +61,57 @@ As LLM usage shifts to multi-project and multi-role shared deployments, governan
 
 ### 中文
 
-IS-CGP 定位为 **大模型服务的治理中间层**，部署在 **现有聊天 UI / 业务系统** 与 **模型推理后端**（如 `llama.cpp`、`vLLM`）之间。
+IS-CGP 定位为 **大模型服务的治理中间层**，部署在：
 
-它不替代模型、不绑定 UI，而是为所有大模型调用提供统一的治理能力。
+```
+现有聊天 UI / 业务系统
+          ↓
+        IS-CGP
+          ↓
+   模型推理后端
+(llama.cpp / vLLM / others)
+```
 
-### 核心能力
+它 **不绑定 UI、不替代模型、不干预推理实现**，而是为所有模型调用提供统一的治理能力。
 
-* **会话与项目级上下文管理**
-  Session / Project 作为最小隔离单元，避免跨项目上下文污染。
+---
 
-* **策略驱动的上下文拼装**
-  按策略对上下文进行过滤、脱敏，或仅允许检索而不进入 Prompt。
+### 核心能力（Capability-Oriented）
 
-* **分级保密与访问控制**
-  基于 RBAC 与安全标签（Security Labels）的访问控制模型。
+* **会话与项目级隔离**
 
-* **提示词配方库（Prompt Recipes）**
-  面向高频、规范化场景的提示词模板，**授权可选**，而非黑箱替换用户输入。
+  * Session / Project 作为最小治理单元
+  * 防止跨项目、跨任务的上下文污染
+
+* **策略驱动的上下文拼装（Context Governance）**
+
+  * 按规则、策略与状态决定：
+
+    * 哪些信息可被检索
+    * 哪些信息可进入模型上下文
+    * 哪些信息只能作为“证据”而非 Prompt 内容
+
+* **RLM 风格的上下文治理流水线**
+
+  * 采用 RLM（Reasoning / Retrieval / Logic / Memory）作为工程语义参考
+  * **不主张 RLM 概念创新**
+  * 聚焦其在治理系统中的 **工程化实现与可解释执行**
 
 * **审计与证据链（Audit & Evidence Trace）**
-  记录模型回答所依赖的资料来源、策略决策、过滤记录与缓存使用情况。
 
-* **多级缓存治理**
-  统一管理检索缓存、前缀缓存及可选 KV Cache，并支持策略与权限变更后的可靠失效。
+  * 记录每一次上下文选择的依据
+  * 支持事后审计、问题回溯与责任界定
 
-### EN (Summary)
+* **长上下文治理与缓存约束**
 
-IS-CGP is a governance capability layer providing session isolation, policy-driven context assembly, access control, auditability, and cache governance—without modifying the inference engine.
+  * 在长上下文场景下：
+
+    * 控制上下文规模
+    * 约束缓存复用
+    * 保证策略变更后的可靠失效
+
+> **EN (Summary)**
+> IS-CGP focuses on auditable context governance rather than UI, inference, or model training.
 
 ---
 
@@ -78,39 +119,31 @@ IS-CGP is a governance capability layer providing session isolation, policy-driv
 
 为避免误解，IS-CGP **明确不承担** 以下职责：
 
-* ❌ 模型训练或参数微调框架
-* ❌ 聊天 UI 或前端系统的替代品
-* ❌ 公网 SaaS 或云端托管服务
-* ❌ 跨部门 / 跨租户自由共享 KV Cache 的系统
+* ❌ 模型训练、微调或推理优化框架
+* ❌ Agent / Planner / AutoGPT 系统
+* ❌ 聊天 UI 或前端产品
+* ❌ 公网 SaaS 或多租户托管服务
+* ❌ 无边界共享 KV Cache 的性能优先系统
 
-IS-CGP 优先考虑 **内网安全性、治理正确性与可审计性**，而非激进的性能复用。
+IS-CGP 优先保证 **治理正确性、可解释性与审计可靠性**，而非激进的性能复用。
 
 ---
 
-## 四、界面与接入策略（UI & Integration）
+## 四、当前研究与工程重心（Current Focus）
 
-IS-CGP 采用 **“两套界面 + 一套标准接口”** 的策略，避免与现有系统冲突。
+### 🎯 当前阶段目标
 
-### 1️⃣ 治理控制台（必需）
+IS-CGP 当前阶段 **不追求平台功能完备**，而是专注于一个可验证的工程目标：
 
-面向管理员与运维人员，用于：
+> **验证并实现一套“可治理的上下文拼装与长上下文控制机制”**
 
-* 项目、角色与权限管理
-* 保密等级与策略配置
-* 提示词配方库维护
-* 缓存监控与失效操作
-* 审计查询与会话回放
+具体聚焦于：
 
-### 2️⃣ 参考聊天 UI（可选）
+* RLM 风格的上下文治理流水线（工程实现）
+* 长上下文场景下的上下文选择、截断与记录
+* 与推理引擎解耦的治理逻辑验证
 
-* 用于能力验证与演示
-* 展示证据链与审计信息
-* 不作为核心依赖组件
-
-### 3️⃣ 标准 API / SDK（核心资产）
-
-* 无侵入接入现有聊天 UI、业务系统或内部工具
-* 治理能力通过 API 统一暴露
+这一阶段允许 **Mock 推理后端**，重点验证治理行为本身。
 
 ---
 
@@ -121,115 +154,106 @@ IS-CGP 采用 **“两套界面 + 一套标准接口”** 的策略，避免与�
               |
         （标准 API / SDK）
               v
-        [ IS-CGP 网关层 ]
+        [ IS-CGP 治理层 ]
         - 会话 / 项目管理
-        - 策略与安全标签
-        - 上下文拼装器
-        - 提示词配方
+        - 上下文治理流水线（RLM-style）
+        - 策略与规则引擎
         - 审计与证据链
         - 缓存治理
               |
               v
       [ 模型推理后端 ]
-   (llama.cpp / vLLM / 其他)
+   (llama.cpp / vLLM / others)
 ```
 
-IS-CGP 与具体推理引擎解耦，支持 **完全离线部署**。
+IS-CGP 与推理引擎 **完全解耦**，支持 **全离线内网部署**。
 
 ---
 
-## 六、身份体系与部署模式
+## 六、项目状态（Project Status）
 
-IS-CGP 通过统一抽象支持多种身份来源：
+🚧 **Active Development**
 
-* **MVP 阶段**：本地账号体系
-* **典型内网部署**：通过反向代理 / 网关透传身份信息
-* **扩展场景**：支持 OIDC / SAML（可选）
-
-治理核心逻辑不依赖具体身份实现。
-
----
-
-## 七、项目状态（Project Status）
-
-🚧 **持续开发中（Active Development）**
-
-* 核心概念与系统定位已稳定
-* 按里程碑逐步实现治理能力
+* 系统定位与工程边界已明确
 * 当前仓库为 **Open Core 基础版本**
+* 以工程验证与可复现性为优先目标
 
 ---
 
-## 八、开发日志（Development Log）
+## 七、开发日志（Development Log）
 
-### v0.1.0 — 基础设施与后端骨架（当前）
+### v0.1.0 — 工程基线与后端骨架（当前）
 
 **目标**
-建立一个 **可重复启动、可审计、可演进** 的工程基线。
+建立一个 **可重复启动、可审计、可演进** 的治理工程基线。
 
 #### 基础设施
 
-* 基于 Docker 的本地开发环境
+* Docker Compose 本地环境
 * PostgreSQL 16（治理元数据）
 * Redis 7（缓存占位）
-* FastAPI 后端服务
-* `docker compose` 一键启动
-* `/healthz` 健康检查接口
+* FastAPI 后端
+* `/healthz` 健康检查
 
-#### 数据库与迁移
+#### 数据库
 
-* Alembic 迁移系统已接入
-* 核心表结构：
+* Alembic 迁移系统
+* 核心表：
 
-  * `projects`（项目隔离单元）
-  * `sessions`（会话实例）
-  * `users`（身份预留）
+  * `projects`
+  * `sessions`
+  * `users`（预留）
   * `alembic_version`
 
-#### 后端 API
+#### API
 
-* FastAPI 应用骨架稳定
-* 自动生成 OpenAPI / Swagger
-* 已实现接口：
+* 自动生成 OpenAPI
+* 已实现：
 
-  * `POST /v1/projects`（按名称幂等创建）
+  * `POST /v1/projects`
   * `GET /v1/projects`
   * `POST /v1/sessions`
   * `GET /v1/sessions`
-* 显式 UUID 序列化，避免隐式类型问题
 
 #### 当前限制
 
-* 尚未引入身份认证与授权
-* Redis 未参与实际缓存治理
-* 治理控制台与 UI 尚未实现
+* 尚未引入认证与授权
+* Redis 未参与实际治理逻辑
+* 无 UI / 控制台
 
 ---
 
-## 九、下一阶段计划（v0.2 预告）
+## 八、路线图（Roadmap）
 
-* JWT 用户认证
-* 项目级 RBAC 权限控制
-* 消息模型与基础聊天接口
-* 面向治理的上下文拼装骨架
+* **v0.2**
+
+  * RLM 风格上下文治理 MVP
+  * 长上下文工程验证
+  * 决策 Trace 落库
+* **v1.0**
+
+  * 治理控制台
+  * 推理适配器
+  * 内网部署与审计手册
 
 ---
 
-## 十、路线图（Roadmap）
+## 九、关于 RLM 的声明（Important Note）
 
-* **v0.1**：核心数据模型与后端骨架
-* **v0.2**：上下文治理、缓存治理、控制台 MVP
-* **v1.0**：内网部署手册、推理适配器、评估指标
+RLM（Reasoning / Retrieval / Logic / Memory）作为一种研究语义已在既有工作中提出。
+
+**IS-CGP 不主张对 RLM 概念本身的创新或所有权**，
+而是专注于其在 **治理系统中的工程化实现、约束与审计能力**。
 
 ---
 
 ## 许可证（License）
 
-本项目采用 **Apache License 2.0**。
+Apache License 2.0
 
 ---
 
-## 名称与声明
+## 名称声明
 
 “IS-CGP（Intelligent Secure Conversation Governance Platform）”为项目名称。
 Fork 或衍生项目不得在未授权情况下使用该名称暗示官方关系。
@@ -239,8 +263,10 @@ Fork 或衍生项目不得在未授权情况下使用该名称暗示官方关系
 ## 维护者（Maintainers）
 
 Maintained by **Ay1men2** and contributors.
-欢迎提交 Issue、讨论设计与贡献代码。
+欢迎 Issue、设计讨论与工程贡献。
 
 ---
+
+
 
 
