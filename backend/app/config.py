@@ -10,5 +10,6 @@ class Settings(BaseSettings):
     inference_timeout_s: float = Field(default=30.0, validation_alias="INFERENCE_TIMEOUT_S")
     inference_retry_max: int = Field(default=2, validation_alias="INFERENCE_RETRY_MAX")
     inference_retry_backoff_s: float = Field(default=1.0, validation_alias="INFERENCE_RETRY_BACKOFF_S")
+    rlm_glimpse_ttl_sec: int = Field(default=3600, validation_alias="RLM_GLIMPSE_TTL_SEC")
 
 settings = Settings()
