@@ -150,12 +150,20 @@ class RlmRepoSQL:
         )
 
     # --- rlm_runs write (minimal) ---
-    def insert_run(self, session_id: str, query: str, options: dict, candidate_index: dict) -> str:
+    def insert_run(
+        self,
+        session_id: str,
+        query: str,
+        options: dict | None = None,
+        candidate_index: dict | None = None,
+    ) -> str:
         """
         写入一条 rlm_runs 记录（v0：只落 options + candidate_index）
         这里的 jsonb cast 不会触发你遇到的 :param::type 问题，因为我们是对 SQL literal cast：
         :options::jsonb OK（注意：这是在 VALUES 里，属于 SQL 表达式；不是 WHERE 里 :id::uuid 那种）
         """
+        options = options or {}
+        candidate_index = candidate_index or {}
         with self.engine.begin() as conn:
             row = conn.execute(
                 text(
