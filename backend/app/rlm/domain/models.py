@@ -16,6 +16,7 @@ class Candidate(BaseModel):
 
     # 只放 preview，不放全文
     content_preview: str = ""
+    content_hash: Optional[str] = None
     token_estimate: Optional[int] = None
 
     # retrieval 解释字段（确定性，可用于 debug）
@@ -28,4 +29,3 @@ class CandidateIndex(BaseModel):
     project_id: str
     query: str
     candidates: list[Candidate]
-

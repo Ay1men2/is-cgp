@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 from dataclasses import dataclass
 
 from sqlalchemy import text
@@ -9,11 +10,45 @@ from sqlalchemy.engine import Engine
 from app.rlm.domain.models import Candidate, CandidateIndex
 
 
+class ArtifactRepo:
+    """
+    访问 artifacts 表的轻量 SQL 仓库。
+    """
+
+    def __init__(self, engine: Engine):
+        self.engine = engine
+
+    def get_content(self, artifact_id: str) -> dict[str, Any]:
+        sql = text(
+            """
+            SELECT
+                id::text AS artifact_id,
+                content,
+                content_hash,
+                metadata
+            FROM artifacts
+            WHERE id = :artifact_id
+            LIMIT 1
+            """
+        )
+        with self.engine.connect() as conn:
+            row = conn.execute(sql, {"artifact_id": artifact_id}).mappings().first()
+            if not row:
+                raise ValueError(f"artifact_id not found: {artifact_id}")
+            return {
+                "artifact_id": row["artifact_id"],
+                "content": row["content"],
+                "content_hash": row["content_hash"],
+                "metadata": row.get("metadata") or {},
+            }
+
+
 @dataclass(frozen=True)
 class RetrievalOptions:
     include_global: bool = True
     top_k: int = 20
     preview_chars: int = 240
+    types: list[str] | None = None
 
 
 class RlmRepoSQL:
@@ -50,6 +85,7 @@ class RlmRepoSQL:
         self,
         session_id: str,
         query: str,
+        tokens: list[str],
         opt: RetrievalOptions,
     ) -> CandidateIndex:
         project_id = self._get_project_id_by_session(session_id)
@@ -58,12 +94,6 @@ class RlmRepoSQL:
         scopes: list[str] = ["session", "project"]
         if opt.include_global:
             scopes.append("global")
-
-        # v0 最轻量 token：按空格切；最多 8 个，防止 OR/unnest 爆炸
-        tokens = [t for t in query.replace("\n", " ").split(" ") if t.strip()]
-        tokens = tokens[:8]
-        if not tokens:
-            tokens = [query]
 
         # 关键点：
         # 1) 不要用 :session_id::uuid / :project_id::uuid
@@ -80,6 +110,7 @@ class RlmRepoSQL:
                 weight,
                 source,
                 token_estimate,
+                content_hash,
                 left(content, :preview_chars) AS content_preview,
 
                 (
@@ -92,6 +123,7 @@ class RlmRepoSQL:
             WHERE status = 'active'
               AND project_id = :project_id
               AND scope = ANY(:scopes)
+              AND (:types IS NULL OR type = ANY(:types))
               AND (
                     (scope = 'session' AND session_id = :session_id)
                  OR (scope <> 'session')
@@ -111,6 +143,7 @@ class RlmRepoSQL:
                     "tokens": tokens,
                     "top_k": opt.top_k,
                     "preview_chars": opt.preview_chars,
+                    "types": opt.types,
                 },
             ).mappings().all()
 
@@ -132,6 +165,7 @@ class RlmRepoSQL:
                     weight=weight,
                     source=r.get("source") or "manual",
                     content_preview=r.get("content_preview") or "",
+                    content_hash=r.get("content_hash"),
                     token_estimate=r.get("token_estimate"),
                     base_score=base_score,
                     score_breakdown={
@@ -150,12 +184,20 @@ class RlmRepoSQL:
         )
 
     # --- rlm_runs write (minimal) ---
-    def insert_run(self, session_id: str, query: str, options: dict, candidate_index: dict) -> str:
+    def insert_run(
+        self,
+        session_id: str,
+        query: str,
+        options: dict | None = None,
+        candidate_index: dict | None = None,
+    ) -> str:
         """
         写入一条 rlm_runs 记录（v0：只落 options + candidate_index）
         这里的 jsonb cast 不会触发你遇到的 :param::type 问题，因为我们是对 SQL literal cast：
         :options::jsonb OK（注意：这是在 VALUES 里，属于 SQL 表达式；不是 WHERE 里 :id::uuid 那种）
         """
+        options = options or {}
+        candidate_index = candidate_index or {}
         with self.engine.begin() as conn:
             row = conn.execute(
                 text(
@@ -173,3 +215,87 @@ class RlmRepoSQL:
                 },
             ).mappings().one()
             return row["id"]
+
+    def append_round(
+        self,
+        run_id: str,
+        round_payload: dict | list,
+        llm_raw_append: str | dict | list | None,
+        errors_append: list | dict | None,
+    ) -> None:
+        """
+        追加一轮执行结果：
+        - rounds: jsonb array append
+        - llm_raw: text 追加（如需保存结构化 raw，可由上游自行 json.dumps）
+        - errors: jsonb array append
+        """
+        round_payload_json = json.dumps(self._ensure_jsonb_array(round_payload))
+        errors_append_json = json.dumps(self._ensure_jsonb_array(errors_append))
+        llm_raw_text = self._normalize_llm_raw_append(llm_raw_append)
+
+        with self.engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    UPDATE rlm_runs
+                    SET rounds = rounds || :round_payload::jsonb,
+                        llm_raw = llm_raw || :llm_raw_append,
+                        errors = errors || :errors_append::jsonb
+                    WHERE id = :run_id
+                    """
+                ),
+                {
+                    "run_id": run_id,
+                    "round_payload": round_payload_json,
+                    "llm_raw_append": llm_raw_text,
+                    "errors_append": errors_append_json,
+                },
+            )
+
+    def finish_run(
+        self,
+        run_id: str,
+        assembled_context: dict,
+        rendered_prompt: str | None,
+        status: str,
+        errors: list | dict | None,
+    ) -> None:
+        errors_json = json.dumps(self._ensure_jsonb_array(errors))
+        assembled_context_json = json.dumps(assembled_context)
+
+        with self.engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    UPDATE rlm_runs
+                    SET assembled_context = :assembled_context::jsonb,
+                        rendered_prompt = :rendered_prompt,
+                        status = :status,
+                        errors = :errors::jsonb
+                    WHERE id = :run_id
+                    """
+                ),
+                {
+                    "run_id": run_id,
+                    "assembled_context": assembled_context_json,
+                    "rendered_prompt": rendered_prompt,
+                    "status": status,
+                    "errors": errors_json,
+                },
+            )
+
+    @staticmethod
+    def _ensure_jsonb_array(payload: list | dict | None) -> list:
+        if payload is None:
+            return []
+        if isinstance(payload, list):
+            return payload
+        return [payload]
+
+    @staticmethod
+    def _normalize_llm_raw_append(payload: str | dict | list | None) -> str:
+        if payload is None:
+            return ""
+        if isinstance(payload, str):
+            return payload
+        return json.dumps(payload, ensure_ascii=False)
