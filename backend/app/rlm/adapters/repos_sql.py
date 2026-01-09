@@ -35,7 +35,7 @@ class RlmRepoSQL:
             """
             SELECT project_id::text AS project_id
             FROM sessions
-            WHERE id = session_id
+            WHERE id = :session_id
             LIMIT 1
             """
         )
@@ -173,4 +173,3 @@ class RlmRepoSQL:
                 },
             ).mappings().one()
             return row["id"]
-
