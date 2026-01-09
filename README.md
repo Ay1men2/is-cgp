@@ -1,10 +1,8 @@
----
 
 # IS-CGP — 智安对话治理平台
 
 **Intelligent Secure Conversation Governance Platform**
 
----
 
 ## 项目定位（Positioning）
 
