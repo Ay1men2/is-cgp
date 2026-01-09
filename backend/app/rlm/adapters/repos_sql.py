@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
@@ -14,6 +14,7 @@ class RetrievalOptions:
     include_global: bool = True
     top_k: int = 20
     preview_chars: int = 240
+    allowed_types: list[str] = field(default_factory=list)
 
 
 class RlmRepoSQL:
@@ -35,7 +36,7 @@ class RlmRepoSQL:
             """
             SELECT project_id::text AS project_id
             FROM sessions
-            WHERE id = session_id
+            WHERE id = :session_id
             LIMIT 1
             """
         )
@@ -51,6 +52,7 @@ class RlmRepoSQL:
         session_id: str,
         query: str,
         opt: RetrievalOptions,
+        tokens: list[str],
     ) -> CandidateIndex:
         project_id = self._get_project_id_by_session(session_id)
 
@@ -58,12 +60,6 @@ class RlmRepoSQL:
         scopes: list[str] = ["session", "project"]
         if opt.include_global:
             scopes.append("global")
-
-        # v0 最轻量 token：按空格切；最多 8 个，防止 OR/unnest 爆炸
-        tokens = [t for t in query.replace("\n", " ").split(" ") if t.strip()]
-        tokens = tokens[:8]
-        if not tokens:
-            tokens = [query]
 
         # 关键点：
         # 1) 不要用 :session_id::uuid / :project_id::uuid
@@ -76,6 +72,7 @@ class RlmRepoSQL:
                 scope,
                 type,
                 title,
+                content_hash,
                 pinned,
                 weight,
                 source,
@@ -91,6 +88,7 @@ class RlmRepoSQL:
             FROM artifacts
             WHERE status = 'active'
               AND project_id = :project_id
+              AND type = ANY(:types)
               AND scope = ANY(:scopes)
               AND (
                     (scope = 'session' AND session_id = :session_id)
@@ -108,6 +106,7 @@ class RlmRepoSQL:
                     "project_id": project_id,
                     "session_id": session_id,
                     "scopes": scopes,
+                    "types": opt.allowed_types,
                     "tokens": tokens,
                     "top_k": opt.top_k,
                     "preview_chars": opt.preview_chars,
@@ -128,6 +127,7 @@ class RlmRepoSQL:
                     scope=r["scope"],
                     type=r["type"],
                     title=r.get("title"),
+                    content_hash=r["content_hash"],
                     pinned=pinned,
                     weight=weight,
                     source=r.get("source") or "manual",
@@ -173,4 +173,3 @@ class RlmRepoSQL:
                 },
             ).mappings().one()
             return row["id"]
-
