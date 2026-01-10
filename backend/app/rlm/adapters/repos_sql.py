@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
@@ -14,6 +14,7 @@ class RetrievalOptions:
     include_global: bool = True
     top_k: int = 20
     preview_chars: int = 240
+    allowed_types: list[str] = field(default_factory=list)
 
 
 class RlmRepoSQL:
@@ -35,7 +36,7 @@ class RlmRepoSQL:
             """
             SELECT project_id::text AS project_id
             FROM sessions
-            WHERE id = session_id
+            WHERE id = :session_id
             LIMIT 1
             """
         )
@@ -51,6 +52,7 @@ class RlmRepoSQL:
         session_id: str,
         query: str,
         opt: RetrievalOptions,
+        tokens: list[str],
     ) -> CandidateIndex:
         project_id = self._get_project_id_by_session(session_id)
 
@@ -58,12 +60,6 @@ class RlmRepoSQL:
         scopes: list[str] = ["session", "project"]
         if opt.include_global:
             scopes.append("global")
-
-        # v0 最轻量 token：按空格切；最多 8 个，防止 OR/unnest 爆炸
-        tokens = [t for t in query.replace("\n", " ").split(" ") if t.strip()]
-        tokens = tokens[:8]
-        if not tokens:
-            tokens = [query]
 
         # 关键点：
         # 1) 不要用 :session_id::uuid / :project_id::uuid
@@ -76,6 +72,7 @@ class RlmRepoSQL:
                 scope,
                 type,
                 title,
+                content_hash,
                 pinned,
                 weight,
                 source,
@@ -91,6 +88,7 @@ class RlmRepoSQL:
             FROM artifacts
             WHERE status = 'active'
               AND project_id = :project_id
+              AND type = ANY(:types)
               AND scope = ANY(:scopes)
               AND (
                     (scope = 'session' AND session_id = :session_id)
@@ -108,6 +106,7 @@ class RlmRepoSQL:
                     "project_id": project_id,
                     "session_id": session_id,
                     "scopes": scopes,
+                    "types": opt.allowed_types,
                     "tokens": tokens,
                     "top_k": opt.top_k,
                     "preview_chars": opt.preview_chars,
@@ -128,6 +127,7 @@ class RlmRepoSQL:
                     scope=r["scope"],
                     type=r["type"],
                     title=r.get("title"),
+                    content_hash=r["content_hash"],
                     pinned=pinned,
                     weight=weight,
                     source=r.get("source") or "manual",
@@ -174,3 +174,73 @@ class RlmRepoSQL:
             ).mappings().one()
             return row["id"]
 
+    def append_round(
+        self,
+        run_id: str,
+        round_payload: list[dict] | dict,
+        llm_raw_append: list[dict] | dict | None = None,
+        errors_append: list[dict] | dict | None = None,
+    ) -> None:
+        if isinstance(round_payload, dict):
+            round_payload = [round_payload]
+        if isinstance(llm_raw_append, dict):
+            llm_raw_append = [llm_raw_append]
+        if isinstance(errors_append, dict):
+            errors_append = [errors_append]
+
+        llm_raw_append = llm_raw_append or []
+        errors_append = errors_append or []
+
+        with self.engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    UPDATE rlm_runs
+                    SET
+                        rounds = COALESCE(rounds, '[]'::jsonb) || :round_payload::jsonb,
+                        llm_raw = COALESCE(llm_raw, '[]'::jsonb) || :llm_raw_append::jsonb,
+                        errors = COALESCE(errors, '[]'::jsonb) || :errors_append::jsonb
+                    WHERE id = :run_id
+                    """
+                ),
+                {
+                    "run_id": run_id,
+                    "round_payload": json.dumps(round_payload),
+                    "llm_raw_append": json.dumps(llm_raw_append),
+                    "errors_append": json.dumps(errors_append),
+                },
+            )
+
+    def finish_run(
+        self,
+        run_id: str,
+        assembled_context: dict,
+        rendered_prompt: str | None,
+        status: str,
+        errors: list[dict] | dict | None = None,
+    ) -> None:
+        if isinstance(errors, dict):
+            errors = [errors]
+        errors = errors or []
+
+        with self.engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    UPDATE rlm_runs
+                    SET
+                        assembled_context = :assembled_context::jsonb,
+                        rendered_prompt = :rendered_prompt,
+                        status = :status,
+                        errors = :errors::jsonb
+                    WHERE id = :run_id
+                    """
+                ),
+                {
+                    "run_id": run_id,
+                    "assembled_context": json.dumps(assembled_context),
+                    "rendered_prompt": rendered_prompt,
+                    "status": status,
+                    "errors": json.dumps(errors),
+                },
+            )
