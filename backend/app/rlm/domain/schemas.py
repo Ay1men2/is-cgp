@@ -6,6 +6,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+SCHEMA_VERSION = 1
+
 
 class PlanRound(BaseModel):
     round_id: int = Field(ge=1)
@@ -14,6 +16,7 @@ class PlanRound(BaseModel):
 
 
 class Plan(BaseModel):
+    schema_version: int = Field(ge=1)
     rounds: list[PlanRound] = Field(default_factory=list)
     strategy: str | None = None
 
@@ -25,6 +28,7 @@ class DecisionRound(BaseModel):
 
 
 class Decision(BaseModel):
+    schema_version: int = Field(ge=1)
     rounds: list[DecisionRound] = Field(default_factory=list)
     degraded: bool = False
 
@@ -55,11 +59,20 @@ def _parse_payload(payload: str | dict[str, Any]) -> dict[str, Any]:
         raise
 
 
+def _validate_schema_version(data: dict[str, Any]) -> None:
+    if data.get("schema_version") != SCHEMA_VERSION:
+        raise ValueError(
+            f"schema_version_mismatch: expected {SCHEMA_VERSION}, got {data.get('schema_version')}"
+        )
+
+
 def parse_plan(payload: str | dict[str, Any]) -> Plan:
     data = _parse_payload(payload)
+    _validate_schema_version(data)
     return Plan.model_validate(data)
 
 
 def parse_decision(payload: str | dict[str, Any]) -> Decision:
     data = _parse_payload(payload)
+    _validate_schema_version(data)
     return Decision.model_validate(data)
