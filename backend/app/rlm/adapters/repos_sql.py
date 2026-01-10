@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
@@ -86,7 +87,6 @@ class RlmRepoSQL:
         query: str,
         tokens: list[str],
         opt: RetrievalOptions,
-        tokens: list[str],
     ) -> CandidateIndex:
         project_id = self._get_project_id_by_session(session_id)
 
@@ -123,7 +123,6 @@ class RlmRepoSQL:
             FROM artifacts
             WHERE status = 'active'
               AND project_id = :project_id
-              AND type = ANY(:types)
               AND scope = ANY(:scopes)
               AND (:types IS NULL OR type = ANY(:types))
               AND (
@@ -136,17 +135,17 @@ class RlmRepoSQL:
         )
 
         with self.engine.connect() as conn:
+            allowed_types = opt.allowed_types or None
             rows = conn.execute(
                 sql,
                 {
                     "project_id": project_id,
                     "session_id": session_id,
                     "scopes": scopes,
-                    "types": opt.allowed_types,
+                    "types": allowed_types,
                     "tokens": tokens,
                     "top_k": opt.top_k,
                     "preview_chars": opt.preview_chars,
-                    "types": opt.types,
                 },
             ).mappings().all()
 
@@ -257,6 +256,76 @@ class RlmRepoSQL:
                 },
             )
 
+    def update_run(self, run_id: str, patch_jsonb: dict[str, Any]) -> None:
+        if not patch_jsonb:
+            return
+
+        events_payload = self._normalize_list_payload(patch_jsonb.get("events"))
+        update_clauses: list[str] = []
+        params: dict[str, Any] = {"run_id": run_id}
+
+        if "program" in patch_jsonb:
+            update_clauses.append("program = :program::jsonb")
+            params["program"] = json.dumps(patch_jsonb.get("program") or [])
+        if "program_meta" in patch_jsonb:
+            update_clauses.append("program_meta = :program_meta::jsonb")
+            params["program_meta"] = json.dumps(patch_jsonb.get("program_meta") or {})
+        if "events" in patch_jsonb:
+            update_clauses.append("events = COALESCE(events, '[]'::jsonb) || :events::jsonb")
+            params["events"] = json.dumps(events_payload)
+        if "glimpses" in patch_jsonb:
+            update_clauses.append("glimpses = COALESCE(glimpses, '[]'::jsonb) || :glimpses::jsonb")
+            params["glimpses"] = json.dumps(self._normalize_list_payload(patch_jsonb.get("glimpses")))
+        if "subcalls" in patch_jsonb:
+            update_clauses.append("subcalls = COALESCE(subcalls, '[]'::jsonb) || :subcalls::jsonb")
+            params["subcalls"] = json.dumps(self._normalize_list_payload(patch_jsonb.get("subcalls")))
+        if "final_answer" in patch_jsonb:
+            update_clauses.append("final_answer = :final_answer")
+            params["final_answer"] = patch_jsonb.get("final_answer")
+        if "citations" in patch_jsonb:
+            update_clauses.append("citations = COALESCE(citations, '[]'::jsonb) || :citations::jsonb")
+            params["citations"] = json.dumps(self._normalize_list_payload(patch_jsonb.get("citations")))
+        if "options" in patch_jsonb:
+            update_clauses.append("options = :options::jsonb")
+            params["options"] = json.dumps(patch_jsonb.get("options") or {})
+        if "candidate_index" in patch_jsonb:
+            update_clauses.append("candidate_index = :candidate_index::jsonb")
+            params["candidate_index"] = json.dumps(patch_jsonb.get("candidate_index") or {})
+        if "errors" in patch_jsonb:
+            update_clauses.append("errors = COALESCE(errors, '[]'::jsonb) || :errors::jsonb")
+            params["errors"] = json.dumps(self._normalize_list_payload(patch_jsonb.get("errors")))
+        if "status" in patch_jsonb:
+            update_clauses.append("status = :status")
+            params["status"] = patch_jsonb.get("status")
+
+        if not update_clauses:
+            return
+
+        with self.engine.begin() as conn:
+            if events_payload:
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO rlm_run_events (run_id, event)
+                        VALUES (:run_id, :event::jsonb)
+                        """
+                    ),
+                    [
+                        {"run_id": run_id, "event": json.dumps(event)}
+                        for event in events_payload
+                    ],
+                )
+            conn.execute(
+                text(
+                    f"""
+                    UPDATE rlm_runs
+                    SET {", ".join(update_clauses)}
+                    WHERE id = :run_id
+                    """
+                ),
+                params,
+            )
+
     def finish_run(
         self,
         run_id: str,
@@ -337,3 +406,10 @@ class RlmRepoSQL:
                     "errors": json.dumps(errors),
                 },
             )
+    @staticmethod
+    def _normalize_list_payload(payload: Any) -> list[Any]:
+        if payload is None:
+            return []
+        if isinstance(payload, list):
+            return payload
+        return [payload]

@@ -1,16 +1,17 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from typing import Any, Mapping
 
 from app.config import settings
 
 
-def make_glimpse_key(artifact_id: str, content_hash: str, spec: Mapping[str, Any]) -> str:
-    payload = json.dumps(spec, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
-    return f"rlm:glimpse:{artifact_id}:{content_hash}:{digest}"
+def make_glimpse_key(run_id: str, glimpse_id: str) -> str:
+    return f"rlm:glimpse:{run_id}:{glimpse_id}"
+
+
+def make_subcall_key(run_id: str, subcall_id: str) -> str:
+    return f"rlm:subcall:{run_id}:{subcall_id}"
 
 
 def _normalize_ttl(value: int) -> int:

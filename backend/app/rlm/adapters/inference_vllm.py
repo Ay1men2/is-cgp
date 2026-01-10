@@ -4,8 +4,10 @@ import json
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
-from typing import Any, Iterable
+from dataclasses import dataclass, replace
+from typing import Any, Iterable, Mapping
+
+from app.rlm.adapters.inference_adapter import InferenceAdapter
 
 
 @dataclass(frozen=True)
@@ -72,3 +74,82 @@ class VllmChatCompletionsClient:
                     break
                 time.sleep(self._retry.backoff_s)
         raise RuntimeError(f"vLLM chat.completions failed after retries: {last_error}")
+
+
+class InferenceVllmAdapter(InferenceAdapter):
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        api_key: str | None = None,
+        default_model: str | None = None,
+        default_max_tokens: int | None = None,
+        default_temperature: float | None = None,
+        default_stop: list[str] | None = None,
+        default_extra: dict[str, Any] | None = None,
+        retry: RetryPolicy | None = None,
+    ) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._api_key = api_key
+        self._retry = retry or RetryPolicy()
+        self._client = VllmChatCompletionsClient(
+            self._base_url,
+            api_key=self._api_key,
+            retry=self._retry,
+        )
+        self._default_model = default_model
+        self._default_max_tokens = default_max_tokens
+        self._default_temperature = default_temperature
+        self._default_stop = default_stop
+        self._default_extra = default_extra or {}
+
+    def generate(
+        self,
+        prompt: str,
+        timeout_s: float | None = None,
+        options: dict[str, Any] | None = None,
+    ) -> str:
+        opts = options or {}
+        model = opts.get("model") or self._default_model
+        if not model:
+            raise ValueError("vLLM model is required for inference.")
+
+        max_tokens = opts.get("max_tokens", self._default_max_tokens)
+        temperature = opts.get("temperature", self._default_temperature)
+        stop = opts.get("stop") or self._default_stop
+        extra = {**self._default_extra, **(opts.get("extra") or {})}
+        messages = [{"role": "user", "content": prompt}]
+
+        client = self._client
+        if timeout_s is not None:
+            override_retry = replace(self._retry, timeout_s=timeout_s)
+            client = VllmChatCompletionsClient(
+                self._base_url,
+                api_key=self._api_key,
+                retry=override_retry,
+            )
+
+        response = client.chat_completions(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stop=stop,
+            extra=extra,
+        )
+        return _extract_vllm_content(response)
+
+
+def _extract_vllm_content(response: Mapping[str, Any]) -> str:
+    choices = response.get("choices") or []
+    if not choices:
+        raise RuntimeError("vLLM response missing choices.")
+
+    first = choices[0] or {}
+    message = first.get("message") or {}
+    content = message.get("content")
+    if content is None:
+        content = first.get("text")
+    if content is None:
+        raise RuntimeError("vLLM response missing content.")
+    return str(content).strip()
