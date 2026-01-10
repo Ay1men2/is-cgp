@@ -18,26 +18,11 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.execute(
-        """
-        ALTER TABLE rlm_runs
-            ADD COLUMN IF NOT EXISTS program jsonb NOT NULL DEFAULT '{}'::jsonb,
-            ADD COLUMN IF NOT EXISTS meta jsonb NOT NULL DEFAULT '{}'::jsonb,
-            ADD COLUMN IF NOT EXISTS events jsonb NOT NULL DEFAULT '[]'::jsonb,
-            ADD COLUMN IF NOT EXISTS subcalls jsonb NOT NULL DEFAULT '[]'::jsonb,
-            ADD COLUMN IF NOT EXISTS final jsonb NOT NULL DEFAULT '{}'::jsonb;
-        """
-    )
+    # Deprecated: consolidated into c7f3a8d9e1f2_add_rlm_run_fields_and_events.py.
+    # Keep as no-op to avoid overlapping column adds when branches are merged.
+    pass
 
 
 def downgrade() -> None:
-    op.execute(
-        """
-        ALTER TABLE rlm_runs
-            DROP COLUMN IF EXISTS final,
-            DROP COLUMN IF EXISTS subcalls,
-            DROP COLUMN IF EXISTS events,
-            DROP COLUMN IF EXISTS meta,
-            DROP COLUMN IF EXISTS program;
-        """
-    )
+    # See upgrade() note - no-op.
+    pass

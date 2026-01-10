@@ -18,19 +18,12 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.create_index(
-        'idx_artifacts_project_scope_status_pinned',
-        'artifacts',
-        ['project_id', 'scope', 'status', 'pinned'],
-    )
-    op.create_index(
-        'idx_artifacts_session_scope_status_pinned',
-        'artifacts',
-        ['session_id', 'scope', 'status', 'pinned'],
-    )
+    # Deprecated: indexes are created in b8f1e1c2d3f4_add_artifact_indexes_and_llm_raw_jsonb.py.
+    # Keep as no-op to avoid duplicate index creation when branches are merged.
+    pass
 
 
 
 def downgrade() -> None:
-    op.drop_index('idx_artifacts_session_scope_status_pinned', table_name='artifacts')
-    op.drop_index('idx_artifacts_project_scope_status_pinned', table_name='artifacts')
+    # See upgrade() note - no-op.
+    pass

@@ -21,10 +21,12 @@ def upgrade() -> None:
     op.execute(
         """
         ALTER TABLE rlm_runs
-            ADD COLUMN IF NOT EXISTS program jsonb NOT NULL DEFAULT '[]'::jsonb,
+            ADD COLUMN IF NOT EXISTS program jsonb NOT NULL DEFAULT '{}'::jsonb,
             ADD COLUMN IF NOT EXISTS program_meta jsonb NOT NULL DEFAULT '{}'::jsonb,
+            ADD COLUMN IF NOT EXISTS meta jsonb NOT NULL DEFAULT '{}'::jsonb,
             ADD COLUMN IF NOT EXISTS events jsonb NOT NULL DEFAULT '[]'::jsonb,
             ADD COLUMN IF NOT EXISTS subcalls jsonb NOT NULL DEFAULT '[]'::jsonb,
+            ADD COLUMN IF NOT EXISTS final jsonb NOT NULL DEFAULT '{}'::jsonb,
             ADD COLUMN IF NOT EXISTS final_answer text NULL,
             ADD COLUMN IF NOT EXISTS citations jsonb NOT NULL DEFAULT '[]'::jsonb;
 
@@ -61,8 +63,10 @@ def downgrade() -> None:
         ALTER TABLE rlm_runs
             DROP COLUMN IF EXISTS program,
             DROP COLUMN IF EXISTS program_meta,
+            DROP COLUMN IF EXISTS meta,
             DROP COLUMN IF EXISTS events,
             DROP COLUMN IF EXISTS subcalls,
+            DROP COLUMN IF EXISTS final,
             DROP COLUMN IF EXISTS final_answer,
             DROP COLUMN IF EXISTS citations;
 
