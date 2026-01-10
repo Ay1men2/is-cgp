@@ -55,6 +55,11 @@ class RlmRunResp(BaseModel):
 
 
 @router.post("/assemble", response_model=RlmAssembleResp)
+def rlm_assemble(req: RlmAssembleReq, engine: Engine = Depends(get_engine)) -> RlmAssembleResp:
+    if not req.query.strip() and req.options.get("mode") != "browse":
+        raise HTTPException(status_code=400, detail="empty_query_not_allowed")
+    repo = RlmRepoSQL(engine)
+
 def rlm_assemble(
     req: RlmAssembleReq,
     service: RlmAssembleService = Depends(get_rlm_assemble_service),
@@ -95,6 +100,11 @@ def rlm_assemble(
 
     return RlmAssembleResp(**result)
 
+@router.post("/run", response_model=RlmRunResp)
+def rlm_run(req: RlmRunReq, engine: Engine = Depends(get_engine)) -> RlmRunResp:
+    if not req.query.strip() and req.options.get("mode") != "browse":
+        raise HTTPException(status_code=400, detail="empty_query_not_allowed")
+    repo = RlmRepoSQL(engine)
 
 @router.post("/run", response_model=RlmRunResp)
 def rlm_run(
