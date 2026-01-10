@@ -277,6 +277,9 @@ class RlmRepoSQL:
         if "subcalls" in patch_jsonb:
             update_clauses.append("subcalls = COALESCE(subcalls, '[]'::jsonb) || :subcalls::jsonb")
             params["subcalls"] = json.dumps(self._normalize_list_payload(patch_jsonb.get("subcalls")))
+        if "evidence" in patch_jsonb:
+            update_clauses.append("evidence = COALESCE(evidence, '[]'::jsonb) || :evidence::jsonb")
+            params["evidence"] = json.dumps(self._normalize_list_payload(patch_jsonb.get("evidence")))
         if "final_answer" in patch_jsonb:
             update_clauses.append("final_answer = :final_answer")
             params["final_answer"] = patch_jsonb.get("final_answer")
@@ -368,6 +371,7 @@ class RlmRepoSQL:
         glimpses: list[dict],
         glimpses_meta: list[dict],
         subcalls: list[dict],
+        evidence: list[dict],
         final: dict,
         final_answer: str | None,
         citations: list[Any],
@@ -390,6 +394,7 @@ class RlmRepoSQL:
                         glimpses = :glimpses::jsonb,
                         glimpses_meta = :glimpses_meta::jsonb,
                         subcalls = :subcalls::jsonb,
+                        evidence = :evidence::jsonb,
                         final = :final::jsonb,
                         final_answer = :final_answer,
                         citations = :citations::jsonb,
@@ -406,6 +411,7 @@ class RlmRepoSQL:
                     "glimpses": json.dumps(glimpses),
                     "glimpses_meta": json.dumps(glimpses_meta),
                     "subcalls": json.dumps(subcalls),
+                    "evidence": json.dumps(evidence),
                     "final": json.dumps(final),
                     "final_answer": final_answer,
                     "citations": json.dumps(citations),

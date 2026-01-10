@@ -117,6 +117,18 @@ class MockRootLM:
         return RootLMFinalResult(final=final, meta={"mode": "mock"}, raw={"mock": True})
 
 
+def _build_evidence(
+    events: list[dict[str, Any]],
+    glimpses: list[dict[str, Any]],
+    subcalls: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    return [
+        {"type": "events", "items": events},
+        {"type": "glimpses", "items": glimpses},
+        {"type": "subcalls", "items": subcalls},
+    ]
+
+
 class MockExecutor:
     def execute(
         self,
@@ -167,6 +179,7 @@ def run_rlm(
     glimpses: list[dict[str, Any]] = []
     glimpses_meta: list[dict[str, Any]] = []
     subcalls: list[dict[str, Any]] = []
+    evidence: list[dict[str, Any]] = _build_evidence(events, glimpses, subcalls)
     final: dict[str, Any] = {}
     final_answer: str | None = None
     citations: list[Any] = []
@@ -193,6 +206,7 @@ def run_rlm(
         glimpses=glimpses,
         glimpses_meta=glimpses_meta,
         subcalls=subcalls,
+        evidence=evidence,
         final=final,
         final_answer=final_answer,
         citations=citations,
@@ -224,6 +238,7 @@ def run_rlm(
                 if isinstance(item, dict) and item.get("glimpse_meta")
             ]
         subcalls = list(execution.subcalls)
+        evidence = _build_evidence(events, glimpses, subcalls)
         meta["round2"] = {
             **execution.meta,
             "vars": dict(execution.variables),
@@ -242,6 +257,7 @@ def run_rlm(
         glimpses=glimpses,
         glimpses_meta=glimpses_meta,
         subcalls=subcalls,
+        evidence=evidence,
         final=final,
         final_answer=final_answer,
         citations=citations,
@@ -262,7 +278,7 @@ def run_rlm(
         )
 
     try:
-        evidence = [{"events": events}, {"glimpses": glimpses}]
+        evidence = _build_evidence(events, glimpses, subcalls)
         final_result = rootlm.generate_final(index, evidence, subcalls, options)
         final = final_result.final
         final_answer = str(final.get("answer")) if final.get("answer") is not None else None
@@ -283,6 +299,7 @@ def run_rlm(
         glimpses=glimpses,
         glimpses_meta=glimpses_meta,
         subcalls=subcalls,
+        evidence=evidence,
         final=final,
         final_answer=final_answer,
         citations=citations,
