@@ -1,0 +1,70 @@
+name: migrations-demo
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  migrate-and-demo:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: iscpg
+          POSTGRES_USER: iscpg
+          POSTGRES_PASSWORD: iscpg_pwd_change_me
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U iscpg -d iscpg"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=20
+    env:
+      DATABASE_URL: postgresql+psycopg://iscpg:iscpg_pwd_change_me@localhost:5432/iscpg
+      REDIS_URL: redis://localhost:6379/0
+      RLM_BASE_URL: http://127.0.0.1:1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+      - name: Wait for Postgres
+        run: |
+          python - <<'PY'
+          import os
+          import time
+          import psycopg
+
+          url = os.environ["DATABASE_URL"].replace("postgresql+psycopg://", "postgresql://", 1)
+          deadline = time.time() + 60
+          while True:
+            try:
+              conn = psycopg.connect(url)
+              conn.close()
+              break
+            except Exception:
+              if time.time() > deadline:
+                raise
+              time.sleep(1)
+          PY
+      - name: Ensure single Alembic head
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          head_count=$(alembic -c alembic.ini heads | sed '/^\s*$/d' | wc -l | tr -d ' ')
+          if [ "$head_count" -ne 1 ]; then
+            echo "Expected 1 Alembic head, got $head_count"
+            alembic -c alembic.ini heads
+            exit 1
+          fi
+      - name: Alembic upgrade head
+        working-directory: backend
+        run: alembic -c alembic.ini upgrade head
+      - name: Demo smoke test
+        working-directory: backend
+        run: python scripts/demo_rlm.py

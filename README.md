@@ -113,15 +113,23 @@ IS-CGP 与推理引擎完全解耦，适配器可替换。
 
 ---
 
-## Quickstart (Local)
+## Quickstart (Docker, Reproducible)
 
 1. `cp .env.example .env`
-2. `docker compose -f infra/docker-compose.yml up -d --build`
-3. `docker compose -f infra/docker-compose.yml run --rm demo`
-4. `docker compose -f infra/docker-compose.yml down -v`
-## Quickstart
+2. `docker compose -f infra/docker-compose.yml down -v`
+3. `docker compose -f infra/docker-compose.yml up -d --build`
+4. `docker compose -f infra/docker-compose.yml --profile demo run --rm --no-deps demo`
+5. `docker compose -f infra/docker-compose.yml down -v`
 
-- 重置开发环境（停止并移除数据卷）：`./scripts/reset_dev.sh`
+Notes:
+- `backend` 启动会先跑 Alembic 迁移并进入 `starting`，healthcheck 设有 `start_period`，请等待服务转为 `healthy`。
+- `demo` 是一次性任务，建议用 `--profile demo` + `--no-deps`，避免重复触发 backend 冷启动。
+
+Optional shortcuts (Makefile):
+- `make db-reset`
+- `make up`
+- `make migrate`
+- `make demo`
 
 ---
 
