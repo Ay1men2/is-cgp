@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 from sqlalchemy import text
 
 from app.deps import get_engine
+from app.rlm.adapters.repos_sql import RlmRepoSQL
+from app.rlm.services.runner import RunResult, run_rlm
 
 
 def _hash_content(content: str) -> str:
@@ -134,11 +136,11 @@ def _insert_artifacts(conn, project_id: str, session_id: str) -> list[str]:
     return inserted_ids
 
 
-def _call_assemble(base_url: str, session_id: str, query: str) -> dict:
+def _call_run(base_url: str, session_id: str, query: str) -> dict:
     payload = {"session_id": session_id, "query": query, "options": {}}
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
-        f"{base_url.rstrip('/')}/v1/rlm/assemble",
+        f"{base_url.rstrip('/')}/v1/rlm/run",
         data=data,
         headers={"Content-Type": "application/json"},
     )
@@ -146,13 +148,80 @@ def _call_assemble(base_url: str, session_id: str, query: str) -> dict:
         return json.loads(response.read().decode("utf-8"))
 
 
+def _direct_run(session_id: str, query: str) -> RunResult:
+    engine = get_engine()
+    repo = RlmRepoSQL(engine)
+    return run_rlm(repo, session_id, query, {})
+
+
+def _summarize_program(program: dict) -> str:
+    if not program:
+        return "none"
+
+    summary_parts: list[str] = []
+    steps = program.get("steps")
+    if isinstance(steps, list):
+        summary_parts.append(f"steps={len(steps)}")
+    candidate_ids = program.get("candidate_ids")
+    if isinstance(candidate_ids, list):
+        summary_parts.append(f"candidates={len(candidate_ids)}")
+    plan = program.get("plan") or program.get("plan_summary") or program.get("strategy")
+    if plan:
+        plan_text = json.dumps(plan) if isinstance(plan, (dict, list)) else str(plan)
+        plan_text = plan_text.replace("\n", " ").strip()
+        if len(plan_text) > 120:
+            plan_text = f"{plan_text[:120]}…"
+        summary_parts.append(f"plan={plan_text}")
+    if not summary_parts:
+        summary_parts.append(f"keys={sorted(program.keys())}")
+    return ", ".join(summary_parts)
+
+
+def _final_answer_preview(final_answer: str | None, final: dict | None) -> str:
+    answer = final_answer
+    if answer is None and final:
+        raw = final.get("answer")
+        if raw is not None:
+            answer = str(raw)
+    if not answer:
+        return ""
+    answer = answer.replace("\n", " ").strip()
+    if len(answer) > 300:
+        return f"{answer[:300]}…"
+    return answer
+
+
+def _print_run_summary(result: dict) -> None:
+    program_summary = _summarize_program(result.get("program") or {})
+    final_preview = _final_answer_preview(result.get("final_answer"), result.get("final"))
+    print("Run response summary:")
+    print(f"  run_id: {result.get('run_id')}")
+    print(f"  status: {result.get('status')}")
+    print(f"  program/plan summary: {program_summary}")
+    print(f"  glimpses count: {len(result.get('glimpses') or [])}")
+    print(f"  subcalls count: {len(result.get('subcalls') or [])}")
+    print(f"  final_answer preview: {final_preview}")
+
+
+def _print_run_summary_from_result(result: RunResult) -> None:
+    program_summary = _summarize_program(result.program)
+    final_preview = _final_answer_preview(result.final_answer, result.final)
+    print("Run response summary:")
+    print(f"  run_id: {result.run_id}")
+    print(f"  status: {result.status}")
+    print(f"  program/plan summary: {program_summary}")
+    print(f"  glimpses count: {len(result.glimpses)}")
+    print(f"  subcalls count: {len(result.subcalls)}")
+    print(f"  final_answer preview: {final_preview}")
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Demo RLM assemble flow")
+    parser = argparse.ArgumentParser(description="Demo RLM run flow")
     parser.add_argument("--project", default="demo-rlm", help="project name")
     parser.add_argument("--query", default="What is this session about?", help="query text")
     parser.add_argument(
         "--base-url",
-        default=os.getenv("RLM_BASE_URL", "http://localhost:8000"),
+        default=os.getenv("RLM_BASE_URL", "http://backend:8000"),
         help="API base URL",
     )
     args = parser.parse_args()
@@ -167,17 +236,23 @@ def main() -> int:
     print(f"Session ID: {session_id}")
 
     try:
-        resp = _call_assemble(args.base_url, session_id, args.query)
+        resp = _call_run(args.base_url, session_id, args.query)
+        _print_run_summary(resp)
     except Exception as exc:  # noqa: BLE001 - demo script should surface error
-        print(f"Failed to call assemble API: {exc}", file=sys.stderr)
-        return 1
-
-    print("Assemble response summary:")
-    print(f"  run_id: {resp.get('run_id')}")
-    print(f"  status: {resp.get('status')}")
-    print(f"  assembled_context keys: {list((resp.get('assembled_context') or {}).keys())}")
-    print(f"  rounds_summary: {resp.get('rounds_summary')}")
-    print(f"  rendered_prompt: {resp.get('rendered_prompt')}")
+        print(f"Failed to call run API at {args.base_url}: {exc}", file=sys.stderr)
+        print(
+            "Falling back to direct runner invocation. "
+            "Ensure migrations are applied (alembic upgrade head), "
+            "the backend is healthy (docker compose up -d backend), "
+            "and RLM_BASE_URL/--base-url points to the running API.",
+            file=sys.stderr,
+        )
+        try:
+            direct_result = _direct_run(session_id, args.query)
+            _print_run_summary_from_result(direct_result)
+        except Exception as direct_exc:  # noqa: BLE001 - demo script should surface error
+            print(f"Direct runner invocation failed: {direct_exc}", file=sys.stderr)
+            return 1
     return 0
 
 
