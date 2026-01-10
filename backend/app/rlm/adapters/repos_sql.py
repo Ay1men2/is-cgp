@@ -124,7 +124,7 @@ class RlmRepoSQL:
             WHERE status = 'active'
               AND project_id = :project_id
               AND scope = ANY(:scopes)
-              AND (:types IS NULL OR type = ANY(:types))
+              AND (:allowed_types IS NULL OR type = ANY(:allowed_types))
               AND (
                     (scope = 'session' AND session_id = :session_id)
                  OR (scope <> 'session')
@@ -142,7 +142,7 @@ class RlmRepoSQL:
                     "project_id": project_id,
                     "session_id": session_id,
                     "scopes": scopes,
-                    "types": allowed_types,
+                    "allowed_types": allowed_types,
                     "tokens": tokens,
                     "top_k": opt.top_k,
                     "preview_chars": opt.preview_chars,
