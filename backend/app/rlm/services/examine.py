@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any, Mapping
 
 from app.rlm.adapters.cache import get_glimpse, make_glimpse_key, set_glimpse
@@ -95,6 +97,16 @@ def _extract_glimpse(content: str, spec: Mapping[str, Any]) -> tuple[str, dict[s
     return _extract_head(content, head_chars=int(spec.get("head_chars", 800)))
 
 
+def _make_glimpse_id(artifact_id: str, content_hash: str, spec: Mapping[str, Any]) -> str:
+    payload = json.dumps(
+        {"artifact_id": artifact_id, "content_hash": content_hash, "spec": dict(spec)},
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def examine_artifact(
     repo: ArtifactRepo,
     redis_client: Any,
@@ -104,11 +116,17 @@ def examine_artifact(
     options = options or {}
     mode = str(options.get("mode", "head"))
     spec = _build_spec(mode, options)
+    preview_chars = _clamp_int(options.get("preview_chars", 240), default=240, lo=1, hi=2000)
+    run_id = str(options.get("run_id") or "unknown")
+    glimpse_id = str(
+        options.get("glimpse_id")
+        or _make_glimpse_id(artifact_id, str(options.get("content_hash") or ""), spec)
+    )
 
     content_hash = options.get("content_hash")
     glimpse_key = None
     if content_hash:
-        glimpse_key = make_glimpse_key(artifact_id, str(content_hash), spec)
+        glimpse_key = make_glimpse_key(run_id, glimpse_id)
         cached = get_glimpse(redis_client, glimpse_key)
     else:
         cached = None
@@ -120,7 +138,8 @@ def examine_artifact(
         record = repo.get_content(artifact_id)
         content = record["content"]
         content_hash = record["content_hash"]
-        glimpse_key = make_glimpse_key(artifact_id, content_hash, spec)
+        glimpse_id = str(options.get("glimpse_id") or _make_glimpse_id(artifact_id, content_hash, spec))
+        glimpse_key = make_glimpse_key(run_id, glimpse_id)
 
         cached = get_glimpse(redis_client, glimpse_key)
         if cached:
@@ -135,10 +154,13 @@ def examine_artifact(
             }
             set_glimpse(redis_client, glimpse_key, {"meta": glimpse_meta, "text": glimpse_text})
 
-    include_text = bool(options.get("include_text", True))
+    glimpse_preview = glimpse_text[:preview_chars]
+    include_text = bool(options.get("include_text", False))
     payload: dict[str, Any] = {
-        "glimpse_key": glimpse_key,
+        "redis_key": glimpse_key,
         "glimpse_meta": glimpse_meta,
+        "glimpse_preview": glimpse_preview,
+        "glimpse_hash": content_hash,
     }
     if include_text:
         payload["glimpse_text"] = glimpse_text
