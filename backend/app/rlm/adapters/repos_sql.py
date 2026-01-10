@@ -219,3 +219,74 @@ class RlmRepoSQL:
                 },
             ).mappings().one()
             return row["id"]
+
+    def append_round(
+        self,
+        run_id: str,
+        round_payload: list[dict] | dict,
+        llm_raw_append: list[dict] | dict | None = None,
+        errors_append: list[dict] | dict | None = None,
+    ) -> None:
+        if isinstance(round_payload, dict):
+            round_payload = [round_payload]
+        if isinstance(llm_raw_append, dict):
+            llm_raw_append = [llm_raw_append]
+        if isinstance(errors_append, dict):
+            errors_append = [errors_append]
+
+        llm_raw_append = llm_raw_append or []
+        errors_append = errors_append or []
+
+        with self.engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    UPDATE rlm_runs
+                    SET
+                        rounds = COALESCE(rounds, '[]'::jsonb) || :round_payload::jsonb,
+                        llm_raw = COALESCE(llm_raw, '[]'::jsonb) || :llm_raw_append::jsonb,
+                        errors = COALESCE(errors, '[]'::jsonb) || :errors_append::jsonb
+                    WHERE id = :run_id
+                    """
+                ),
+                {
+                    "run_id": run_id,
+                    "round_payload": json.dumps(round_payload),
+                    "llm_raw_append": json.dumps(llm_raw_append),
+                    "errors_append": json.dumps(errors_append),
+                },
+            )
+
+    def finish_run(
+        self,
+        run_id: str,
+        assembled_context: dict,
+        rendered_prompt: str | None,
+        status: str,
+        errors: list[dict] | dict | None = None,
+    ) -> None:
+        if isinstance(errors, dict):
+            errors = [errors]
+        errors = errors or []
+
+        with self.engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    UPDATE rlm_runs
+                    SET
+                        assembled_context = :assembled_context::jsonb,
+                        rendered_prompt = :rendered_prompt,
+                        status = :status,
+                        errors = :errors::jsonb
+                    WHERE id = :run_id
+                    """
+                ),
+                {
+                    "run_id": run_id,
+                    "assembled_context": json.dumps(assembled_context),
+                    "rendered_prompt": rendered_prompt,
+                    "status": status,
+                    "errors": json.dumps(errors),
+                },
+            )
