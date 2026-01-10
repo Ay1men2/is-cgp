@@ -74,6 +74,9 @@ def build_candidate_index(
     - options: include_global/top_k/preview_chars
     """
     options = options or {}
+    query_stripped = query.strip()
+    if not query_stripped and options.get("mode") != "browse":
+        raise ValueError("empty_query_not_allowed")
 
     allowed_types = list(options.get("allowed_types") or [])
     if not allowed_types:
@@ -86,8 +89,11 @@ def build_candidate_index(
         allowed_types=allowed_types,
     )
 
-    tokens = _build_tokens(query)
-    if not tokens:
-        tokens = [query]
+    if not query_stripped and options.get("mode") == "browse":
+        tokens: list[str] = []
+    else:
+        tokens = _build_tokens(query)
+        if not tokens:
+            tokens = [query]
 
     return repo.list_candidates(session_id=session_id, query=query, opt=opt, tokens=tokens)
