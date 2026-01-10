@@ -113,6 +113,12 @@ IS-CGP 与推理引擎完全解耦，适配器可替换。
 
 ---
 
+## Quickstart
+
+- 重置开发环境（停止并移除数据卷）：`./scripts/reset_dev.sh`
+
+---
+
 ## License
 
 Apache License 2.0
