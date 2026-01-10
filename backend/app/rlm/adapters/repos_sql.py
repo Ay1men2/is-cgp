@@ -360,6 +360,52 @@ class RlmRepoSQL:
                 },
             )
 
+    def update_run_payload(
+        self,
+        run_id: str,
+        *,
+        program: dict,
+        meta: dict,
+        events: list[dict],
+        glimpses: list[dict],
+        subcalls: list[dict],
+        final: dict,
+        status: str,
+        errors: list[dict] | dict | None = None,
+    ) -> None:
+        if isinstance(errors, dict):
+            errors = [errors]
+        errors = errors or []
+
+        with self.engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    UPDATE rlm_runs
+                    SET
+                        program = :program::jsonb,
+                        meta = :meta::jsonb,
+                        events = :events::jsonb,
+                        glimpses = :glimpses::jsonb,
+                        subcalls = :subcalls::jsonb,
+                        final = :final::jsonb,
+                        status = :status,
+                        errors = :errors::jsonb
+                    WHERE id = :run_id
+                    """
+                ),
+                {
+                    "run_id": run_id,
+                    "program": json.dumps(program),
+                    "meta": json.dumps(meta),
+                    "events": json.dumps(events),
+                    "glimpses": json.dumps(glimpses),
+                    "subcalls": json.dumps(subcalls),
+                    "final": json.dumps(final),
+                    "status": status,
+                    "errors": json.dumps(errors),
+                },
+            )
     @staticmethod
     def _normalize_list_payload(payload: Any) -> list[Any]:
         if payload is None:
