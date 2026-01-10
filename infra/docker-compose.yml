@@ -36,8 +36,10 @@ services:
       retries: 20
 
   backend:
-    # 先用一个占位容器保证 compose 拓扑通、网络通、依赖通
-    image: python:3.12-slim
+    image: is-cgp-backend:dev
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
     container_name: is-cpg-backend
     restart: unless-stopped
     working_dir: /app
@@ -60,19 +62,30 @@ services:
       - bash
       - -lc
       - |
-        pip install --no-cache-dir -r requirements.txt
+        set -euo pipefail
         alembic -c alembic.ini upgrade head
         uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import sys; sys.exit(0)\""]
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz', timeout=2)\""
+        ]
       interval: 10s
       timeout: 3s
-      retries: 3
+      retries: 10
+      start_period: 180s
+
 
   demo:
-    image: python:3.12-slim
+    # 推荐运行方式: docker compose -f infra/docker-compose.yml --profile demo run --rm --no-deps demo
+    image: is-cgp-backend:dev
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    profiles: ["demo"]
     container_name: is-cpg-demo
     restart: "no"
     working_dir: /app
@@ -91,12 +104,7 @@ services:
         condition: service_healthy
       backend:
         condition: service_healthy
-    command:
-      - bash
-      - -lc
-      - |
-        pip install --no-cache-dir -r requirements.txt
-        python scripts/demo_rlm.py
+    command: ["python", "scripts/demo_rlm.py"]
 
 volumes:
   pg_data:
