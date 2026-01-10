@@ -111,7 +111,6 @@ class RlmRepoSQL:
                 weight,
                 source,
                 token_estimate,
-                content_hash,
                 left(content, :preview_chars) AS content_preview,
 
                 (
@@ -168,7 +167,6 @@ class RlmRepoSQL:
                     weight=weight,
                     source=r.get("source") or "manual",
                     content_preview=r.get("content_preview") or "",
-                    content_hash=r.get("content_hash"),
                     token_estimate=r.get("token_estimate"),
                     base_score=base_score,
                     score_breakdown={
