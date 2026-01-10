@@ -5,14 +5,13 @@ from pydantic import BaseModel, Field
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.deps import get_engine  # 你已有：返回 Engine（有缓存）
-from sqlalchemy.engine import Engine
-
-from app.rlm.adapters.repos_sql import RlmRepoSQL
-from app.rlm.services.retrieval import build_candidate_index
-from app.rlm.services.runner import run_rlm
-from app.rlm.services.runner import build_limits_snapshot, run_program
-from app.rlm.services.runs import create_minimal_run
+from app.rlm.app.services import (
+    RlmAssembleService,
+    RlmRunService,
+    RlmServiceError,
+    get_rlm_assemble_service,
+    get_rlm_run_service,
+)
 
 router = APIRouter(prefix="/rlm", tags=["rlm"])
 
@@ -49,66 +48,26 @@ class RlmRunResp(BaseModel):
 
 
 @router.post("/assemble", response_model=RlmAssembleResp)
-def rlm_assemble(req: RlmAssembleReq, engine: Engine = Depends(get_engine)) -> RlmAssembleResp:
-    if not req.query.strip():
-        raise HTTPException(status_code=400, detail="empty_query_not_allowed")
-    repo = RlmRepoSQL(engine)
-
+def rlm_assemble(
+    req: RlmAssembleReq,
+    service: RlmAssembleService = Depends(get_rlm_assemble_service),
+) -> RlmAssembleResp:
     try:
-        idx = build_candidate_index(repo, req.session_id, req.query, req.options)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        result = service.assemble(req.session_id, req.query, req.options)
+    except RlmServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
-    options_snapshot = dict(req.options)
-    limits = build_limits_snapshot(options_snapshot)
-    if "limits" in options_snapshot:
-        options_snapshot["limits_snapshot"] = limits
-    else:
-        options_snapshot["limits"] = limits
-
-    run_id = repo.insert_run(
-        session_id=req.session_id,
-        query=req.query,
-        options=options_snapshot,
-        candidate_index=idx.model_dump(),
-    )
-
-    outcome = run_program(idx, options_snapshot, limits=limits)
-    repo.finish_run(
-        run_id=run_id,
-        assembled_context=outcome.assembled_context,
-        rendered_prompt=None,
-        status=outcome.status,
-        errors=outcome.errors,
-    )
-
-    return RlmAssembleResp(
-        run_id=run_id,
-        status=outcome.status,
-        assembled_context=outcome.assembled_context,
-        rounds_summary=[],
-        rendered_prompt=None,
-    )
+    return RlmAssembleResp(**result)
 
 
 @router.post("/run", response_model=RlmRunResp)
-def rlm_run(req: RlmRunReq, engine: Engine = Depends(get_engine)) -> RlmRunResp:
-    if not req.query.strip():
-        raise HTTPException(status_code=400, detail="empty_query_not_allowed")
-    repo = RlmRepoSQL(engine)
-
+def rlm_run(
+    req: RlmRunReq,
+    service: RlmRunService = Depends(get_rlm_run_service),
+) -> RlmRunResp:
     try:
-        result = run_rlm(repo, req.session_id, req.query, req.options)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        result = service.run(req.session_id, req.query, req.options)
+    except RlmServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
-    return RlmRunResp(
-        run_id=result.run_id,
-        status=result.status,
-        program=result.program,
-        glimpses=result.glimpses,
-        subcalls=result.subcalls,
-        final_answer=result.final_answer,
-        citations=result.citations,
-        final=result.final,
-    )
+    return RlmRunResp(**result)
