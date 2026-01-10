@@ -86,7 +86,6 @@ class RlmRepoSQL:
         query: str,
         tokens: list[str],
         opt: RetrievalOptions,
-        tokens: list[str],
     ) -> CandidateIndex:
         project_id = self._get_project_id_by_session(session_id)
 
@@ -123,7 +122,6 @@ class RlmRepoSQL:
             FROM artifacts
             WHERE status = 'active'
               AND project_id = :project_id
-              AND type = ANY(:types)
               AND scope = ANY(:scopes)
               AND (:types IS NULL OR type = ANY(:types))
               AND (
@@ -136,17 +134,17 @@ class RlmRepoSQL:
         )
 
         with self.engine.connect() as conn:
+            allowed_types = opt.allowed_types or None
             rows = conn.execute(
                 sql,
                 {
                     "project_id": project_id,
                     "session_id": session_id,
                     "scopes": scopes,
-                    "types": opt.allowed_types,
+                    "types": allowed_types,
                     "tokens": tokens,
                     "top_k": opt.top_k,
                     "preview_chars": opt.preview_chars,
-                    "types": opt.types,
                 },
             ).mappings().all()
 
