@@ -9,6 +9,39 @@ from sqlalchemy.engine import Engine
 from app.rlm.domain.models import Candidate, CandidateIndex
 
 
+class ArtifactRepo:
+    """
+    访问 artifacts 表的轻量 SQL 仓库。
+    """
+
+    def __init__(self, engine: Engine):
+        self.engine = engine
+
+    def get_content(self, artifact_id: str) -> dict[str, Any]:
+        sql = text(
+            """
+            SELECT
+                id::text AS artifact_id,
+                content,
+                content_hash,
+                metadata
+            FROM artifacts
+            WHERE id = :artifact_id
+            LIMIT 1
+            """
+        )
+        with self.engine.connect() as conn:
+            row = conn.execute(sql, {"artifact_id": artifact_id}).mappings().first()
+            if not row:
+                raise ValueError(f"artifact_id not found: {artifact_id}")
+            return {
+                "artifact_id": row["artifact_id"],
+                "content": row["content"],
+                "content_hash": row["content_hash"],
+                "metadata": row.get("metadata") or {},
+            }
+
+
 @dataclass(frozen=True)
 class RetrievalOptions:
     include_global: bool = True
@@ -51,6 +84,7 @@ class RlmRepoSQL:
         self,
         session_id: str,
         query: str,
+        tokens: list[str],
         opt: RetrievalOptions,
         tokens: list[str],
     ) -> CandidateIndex:
@@ -77,6 +111,7 @@ class RlmRepoSQL:
                 weight,
                 source,
                 token_estimate,
+                content_hash,
                 left(content, :preview_chars) AS content_preview,
 
                 (
@@ -90,6 +125,7 @@ class RlmRepoSQL:
               AND project_id = :project_id
               AND type = ANY(:types)
               AND scope = ANY(:scopes)
+              AND (:types IS NULL OR type = ANY(:types))
               AND (
                     (scope = 'session' AND session_id = :session_id)
                  OR (scope <> 'session')
@@ -110,6 +146,7 @@ class RlmRepoSQL:
                     "tokens": tokens,
                     "top_k": opt.top_k,
                     "preview_chars": opt.preview_chars,
+                    "types": opt.types,
                 },
             ).mappings().all()
 
@@ -132,6 +169,7 @@ class RlmRepoSQL:
                     weight=weight,
                     source=r.get("source") or "manual",
                     content_preview=r.get("content_preview") or "",
+                    content_hash=r.get("content_hash"),
                     token_estimate=r.get("token_estimate"),
                     base_score=base_score,
                     score_breakdown={
@@ -150,12 +188,20 @@ class RlmRepoSQL:
         )
 
     # --- rlm_runs write (minimal) ---
-    def insert_run(self, session_id: str, query: str, options: dict, candidate_index: dict) -> str:
+    def insert_run(
+        self,
+        session_id: str,
+        query: str,
+        options: dict | None = None,
+        candidate_index: dict | None = None,
+    ) -> str:
         """
         写入一条 rlm_runs 记录（v0：只落 options + candidate_index）
         这里的 jsonb cast 不会触发你遇到的 :param::type 问题，因为我们是对 SQL literal cast：
         :options::jsonb OK（注意：这是在 VALUES 里，属于 SQL 表达式；不是 WHERE 里 :id::uuid 那种）
         """
+        options = options or {}
+        candidate_index = candidate_index or {}
         with self.engine.begin() as conn:
             row = conn.execute(
                 text(
