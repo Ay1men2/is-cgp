@@ -148,10 +148,11 @@ def run_rlm(
     executor = executor or MockExecutor()
 
     index = build_candidate_index(repo, session_id, query, options)
+    options_snapshot, limits = normalize_limits_options(options)
     run_id = repo.insert_run(
         session_id=session_id,
         query=query,
-        options=options,
+        options=options_snapshot,
         candidate_index=index.model_dump(),
     )
 
@@ -172,9 +173,8 @@ def run_rlm(
     citations: list[Any] = []
 
     try:
-        policy = dict(options.get("policy") or {})
-        limits = dict(options.get("limits") or {})
-        program_result = rootlm.generate_program(index, policy, limits, options)
+        policy = dict(options_snapshot.get("policy") or {})
+        program_result = rootlm.generate_program(index, policy, limits, options_snapshot)
         program = program_result.program
         meta["round1"] = {
             **program_result.meta,
@@ -213,10 +213,10 @@ def run_rlm(
         )
 
     try:
-        execution = executor.execute(program, index, options)
+        execution = executor.execute(program, index, options_snapshot)
         events = list(execution.events)
         glimpses = list(execution.glimpses)
-        glimpses_meta = list(options.get("glimpses_meta") or [])
+        glimpses_meta = list(options_snapshot.get("glimpses_meta") or [])
         if not glimpses_meta:
             glimpses_meta = [
                 item.get("glimpse_meta")
@@ -263,7 +263,7 @@ def run_rlm(
 
     try:
         evidence = [{"events": events}, {"glimpses": glimpses}]
-        final_result = rootlm.generate_final(index, evidence, subcalls, options)
+        final_result = rootlm.generate_final(index, evidence, subcalls, options_snapshot)
         final = final_result.final
         final_answer = str(final.get("answer")) if final.get("answer") is not None else None
         citations = list(final.get("citations") or [])
@@ -350,6 +350,18 @@ def build_limits_snapshot(options: dict[str, Any]) -> dict[str, int]:
             value = int(default)
         limits[key] = value
     return limits
+
+
+def normalize_limits_options(options: dict[str, Any]) -> tuple[dict[str, Any], dict[str, int]]:
+    options_snapshot = dict(options)
+    raw_limits = options_snapshot.get("limits")
+    limits_source = raw_limits if isinstance(raw_limits, dict) else options_snapshot
+    limits = build_limits_snapshot(limits_source)
+    if isinstance(raw_limits, dict):
+        options_snapshot["limits_snapshot"] = limits
+    else:
+        options_snapshot["limits"] = limits
+    return options_snapshot, limits
 
 
 def _clamp_int(value: Any, *, default: int, lo: int, hi: int) -> int:

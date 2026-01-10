@@ -10,8 +10,7 @@ from sqlalchemy.engine import Engine
 
 from app.rlm.adapters.repos_sql import RlmRepoSQL
 from app.rlm.services.retrieval import build_candidate_index
-from app.rlm.services.runner import run_rlm
-from app.rlm.services.runner import build_limits_snapshot, run_program
+from app.rlm.services.runner import normalize_limits_options, run_program, run_rlm
 from app.rlm.services.runs import create_minimal_run
 
 router = APIRouter(prefix="/rlm", tags=["rlm"])
@@ -59,12 +58,7 @@ def rlm_assemble(req: RlmAssembleReq, engine: Engine = Depends(get_engine)) -> R
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    options_snapshot = dict(req.options)
-    limits = build_limits_snapshot(options_snapshot)
-    if "limits" in options_snapshot:
-        options_snapshot["limits_snapshot"] = limits
-    else:
-        options_snapshot["limits"] = limits
+    options_snapshot, limits = normalize_limits_options(req.options)
 
     run_id = repo.insert_run(
         session_id=req.session_id,
