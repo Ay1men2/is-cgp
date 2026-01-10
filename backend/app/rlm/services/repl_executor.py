@@ -151,16 +151,35 @@ def execute_program(
         try:
             if isinstance(command, ListArtifactsCommand):
                 query = _substitute_vars(command.query, state.variables)
-                index = build_candidate_index(
-                    context.rlm_repo,
-                    session_id=context.session_id,
-                    query=query,
-                    options={
-                        "include_global": command.include_global,
-                        "top_k": command.top_k,
-                        "allowed_types": command.allowed_types,
-                    },
-                )
+                if not query.strip():
+                    _push_event(
+                        events,
+                        seq,
+                        "error",
+                        {"command": command.type},
+                        "empty_query_not_allowed",
+                    )
+                    continue
+                try:
+                    index = build_candidate_index(
+                        context.rlm_repo,
+                        session_id=context.session_id,
+                        query=query,
+                        options={
+                            "include_global": command.include_global,
+                            "top_k": command.top_k,
+                            "allowed_types": command.allowed_types,
+                        },
+                    )
+                except Exception as exc:
+                    _push_event(
+                        events,
+                        seq,
+                        "error",
+                        {"command": command.type, "query": query},
+                        str(exc),
+                    )
+                    continue
                 payload = {
                     "query": query,
                     "count": len(index.candidates),
