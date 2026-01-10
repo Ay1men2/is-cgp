@@ -352,6 +352,18 @@ def build_limits_snapshot(options: dict[str, Any]) -> dict[str, int]:
     return limits
 
 
+def _clamp_int(value: Any, *, default: int, lo: int, hi: int) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return default
+    if number < lo:
+        return lo
+    if number > hi:
+        return hi
+    return number
+
+
 def _extract_program(raw_program: Any) -> Iterable[dict[str, Any]]:
     if raw_program is None:
         return []
@@ -447,7 +459,7 @@ def run_program(
     limits: dict[str, int],
 ) -> RunnerOutcome:
     raw_program = options.get("program")
-    fallback_top_k = int(options.get("fallback_top_k", 5))
+    fallback_top_k = _clamp_int(options.get("fallback_top_k", 5), default=5, lo=1, hi=200)
     errors: list[dict[str, Any]] = []
     events: list[dict[str, Any]] = []
 

@@ -158,6 +158,7 @@ def examine_artifact(
     include_text = bool(options.get("include_text", False))
     payload: dict[str, Any] = {
         "redis_key": glimpse_key,
+        "glimpse_id": glimpse_id,
         "glimpse_meta": glimpse_meta,
         "glimpse_preview": glimpse_preview,
         "glimpse_hash": content_hash,

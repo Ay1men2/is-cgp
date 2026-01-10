@@ -43,6 +43,7 @@ class InferenceAdapter(Protocol):
 @dataclass
 class ReplContext:
     session_id: str
+    run_id: str
     rlm_repo: RlmRepoSQL
     artifact_repo: ArtifactRepo
     redis_client: Any
@@ -334,6 +335,7 @@ def _handle_glimpse(
         {
             "mode": mode,
             **options,
+            "run_id": context.run_id,
             "include_text": True,
         },
     )
@@ -343,11 +345,10 @@ def _handle_glimpse(
     if state.total_glimpse_chars > limits.max_total_glimpse_chars:
         raise ValueError(f"max_total_glimpse_chars exceeded: {limits.max_total_glimpse_chars}")
 
-    glimpse_meta = payload.get("glimpse_meta") or {}
-    content_hash = str(glimpse_meta.get("content_hash") or "")
-    glimpse_key = payload.get("glimpse_key")
-    if not glimpse_key and content_hash:
-        glimpse_key = make_glimpse_key(command.artifact_id, content_hash, spec)
+    glimpse_id = payload.get("glimpse_id")
+    glimpse_key = payload.get("redis_key") or payload.get("glimpse_key")
+    if not glimpse_key and glimpse_id:
+        glimpse_key = make_glimpse_key(context.run_id, str(glimpse_id))
         payload["glimpse_key"] = glimpse_key
 
     preview = glimpse_text[: limits.max_glimpse_chars]
