@@ -10,8 +10,8 @@ from sqlalchemy.engine import Engine
 
 from app.rlm.adapters.repos_sql import RlmRepoSQL
 from app.rlm.services.retrieval import build_candidate_index
-from app.rlm.services.runner import run_rlm
-from app.rlm.services.runner import build_limits_snapshot, run_program
+from app.rlm.services.program_runner import build_limits_snapshot, run_program
+from app.rlm.services.rlm_pipeline import run_rlm
 from app.rlm.services.runs import create_minimal_run
 
 router = APIRouter(prefix="/rlm", tags=["rlm"])

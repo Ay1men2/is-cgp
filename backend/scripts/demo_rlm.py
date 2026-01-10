@@ -13,7 +13,7 @@ from sqlalchemy import text
 
 from app.deps import get_engine
 from app.rlm.adapters.repos_sql import RlmRepoSQL
-from app.rlm.services.runner import RunResult, run_rlm
+from app.rlm.services.rlm_pipeline import RunResult, run_rlm
 
 
 def _hash_content(content: str) -> str:
