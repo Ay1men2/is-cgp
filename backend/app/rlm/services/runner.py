@@ -1,3 +1,6 @@
+"""Backward-compatible exports for legacy imports."""
+
+from app.rlm.services.program_runner import (
 from app.rlm.services.assembly_runner import (
     ProgramLimitError,
     ProgramParseError,
@@ -6,6 +9,10 @@ from app.rlm.services.assembly_runner import (
     deterministic_fallback,
     run_program,
 )
+from app.rlm.services.rlm_pipeline import (
+    ExecutionResult,
+    MockExecutor,
+    MockRootLM,
 from app.rlm.services.run_pipeline import (
     ExecutionResult,
     MockExecutor,
