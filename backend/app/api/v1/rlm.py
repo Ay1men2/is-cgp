@@ -12,6 +12,13 @@ from app.rlm.app.services import (
     get_rlm_assemble_service,
     get_rlm_run_service,
 )
+from app.deps import get_engine  # 你已有：返回 Engine（有缓存）
+from sqlalchemy.engine import Engine
+
+from app.rlm.adapters.repos_sql import RlmRepoSQL
+from app.rlm.services.retrieval import build_candidate_index
+from app.rlm.services.runner import normalize_limits_options, run_program, run_rlm
+from app.rlm.services.runs import create_minimal_run
 
 router = APIRouter(prefix="/rlm", tags=["rlm"])
 
@@ -56,6 +63,35 @@ def rlm_assemble(
         result = service.assemble(req.session_id, req.query, req.options)
     except RlmServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        idx = build_candidate_index(repo, req.session_id, req.query, req.options)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    options_snapshot, limits = normalize_limits_options(req.options)
+
+    run_id = repo.insert_run(
+        session_id=req.session_id,
+        query=req.query,
+        options=options_snapshot,
+        candidate_index=idx.model_dump(),
+    )
+
+    outcome = run_program(idx, options_snapshot, limits=limits)
+    repo.finish_run(
+        run_id=run_id,
+        assembled_context=outcome.assembled_context,
+        rendered_prompt=None,
+        status=outcome.status,
+        errors=outcome.errors,
+    )
+
+    return RlmAssembleResp(
+        run_id=run_id,
+        status=outcome.status,
+        assembled_context=outcome.assembled_context,
+        rounds_summary=[],
+        rendered_prompt=None,
+    )
 
     return RlmAssembleResp(**result)
 
