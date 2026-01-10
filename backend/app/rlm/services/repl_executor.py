@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Protocol
 
@@ -26,6 +27,7 @@ from app.rlm.services.repl_parser import (
     SubcallCommand,
     DEFAULT_LIMITS,
 )
+from app.rlm.services.runs import create_minimal_run
 
 
 class InferenceAdapter(Protocol):
@@ -268,6 +270,15 @@ def execute_program(
                     continue
                 state.subcall_count += 1
                 prompt = _substitute_vars(command.prompt, state.variables)
+                subcall_id = uuid.uuid4().hex
+                child_run_id = None
+                if isinstance(command, SubRlmRunCommand):
+                    child_run_id = create_minimal_run(
+                        context.rlm_repo,
+                        context.session_id,
+                        prompt,
+                        options={"parent_run_id": context.run_id, "subcall_id": subcall_id},
+                    )
                 output = _call_inference(
                     context.inference_adapter,
                     prompt,
@@ -277,10 +288,14 @@ def execute_program(
                 )
                 preview = output[: limits.max_glimpse_chars]
                 payload = {
+                    "subcall_id": subcall_id,
                     "prompt": prompt,
                     "preview": preview,
                     "length": len(output),
                 }
+                if child_run_id:
+                    payload["child_run_id"] = child_run_id
+                    payload["parent_run_id"] = context.run_id
                 if command.store:
                     state.variables[command.store] = output
                 event_type = "subrlm_run" if isinstance(command, SubRlmRunCommand) else "subcall"
