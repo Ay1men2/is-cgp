@@ -40,6 +40,11 @@ class RlmRunReq(BaseModel):
 class RlmRunResp(BaseModel):
     run_id: str
     status: str = "ok"
+    program: dict[str, Any] = Field(default_factory=dict)
+    glimpses: list[dict[str, Any]] = Field(default_factory=list)
+    subcalls: list[dict[str, Any]] = Field(default_factory=list)
+    final_answer: Optional[str] = None
+    citations: list[Any] = Field(default_factory=list)
     final: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -93,4 +98,13 @@ def rlm_run(req: RlmRunReq, engine: Engine = Depends(get_engine)) -> RlmRunResp:
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    return RlmRunResp(run_id=result.run_id, status=result.status, final=result.final)
+    return RlmRunResp(
+        run_id=result.run_id,
+        status=result.status,
+        program=result.program,
+        glimpses=result.glimpses,
+        subcalls=result.subcalls,
+        final_answer=result.final_answer,
+        citations=result.citations,
+        final=result.final,
+    )

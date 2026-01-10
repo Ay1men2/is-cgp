@@ -67,6 +67,11 @@ class RunResult:
     run_id: str
     status: str
     final: dict[str, Any]
+    program: dict[str, Any] = field(default_factory=dict)
+    glimpses: list[dict[str, Any]] = field(default_factory=list)
+    subcalls: list[dict[str, Any]] = field(default_factory=list)
+    final_answer: str | None = None
+    citations: list[Any] = field(default_factory=list)
 
 
 class MockRootLM:
@@ -160,8 +165,11 @@ def run_rlm(
     program: dict[str, Any] = {}
     events: list[dict[str, Any]] = []
     glimpses: list[dict[str, Any]] = []
+    glimpses_meta: list[dict[str, Any]] = []
     subcalls: list[dict[str, Any]] = []
     final: dict[str, Any] = {}
+    final_answer: str | None = None
+    citations: list[Any] = []
 
     try:
         policy = dict(options.get("policy") or {})
@@ -183,19 +191,38 @@ def run_rlm(
         meta=meta,
         events=events,
         glimpses=glimpses,
+        glimpses_meta=glimpses_meta,
         subcalls=subcalls,
         final=final,
+        final_answer=final_answer,
+        citations=citations,
         status=status,
         errors=errors,
     )
 
     if status != "ok":
-        return RunResult(run_id=run_id, status=status, final=final)
+        return RunResult(
+            run_id=run_id,
+            status=status,
+            final=final,
+            program=program,
+            glimpses=glimpses,
+            subcalls=subcalls,
+            final_answer=final_answer,
+            citations=citations,
+        )
 
     try:
         execution = executor.execute(program, index, options)
         events = list(execution.events)
         glimpses = list(execution.glimpses)
+        glimpses_meta = list(options.get("glimpses_meta") or [])
+        if not glimpses_meta:
+            glimpses_meta = [
+                item.get("glimpse_meta")
+                for item in glimpses
+                if isinstance(item, dict) and item.get("glimpse_meta")
+            ]
         subcalls = list(execution.subcalls)
         meta["round2"] = {
             **execution.meta,
@@ -213,19 +240,33 @@ def run_rlm(
         meta=meta,
         events=events,
         glimpses=glimpses,
+        glimpses_meta=glimpses_meta,
         subcalls=subcalls,
         final=final,
+        final_answer=final_answer,
+        citations=citations,
         status=status,
         errors=errors,
     )
 
     if status != "ok":
-        return RunResult(run_id=run_id, status=status, final=final)
+        return RunResult(
+            run_id=run_id,
+            status=status,
+            final=final,
+            program=program,
+            glimpses=glimpses,
+            subcalls=subcalls,
+            final_answer=final_answer,
+            citations=citations,
+        )
 
     try:
         evidence = [{"events": events}, {"glimpses": glimpses}]
         final_result = rootlm.generate_final(index, evidence, subcalls, options)
         final = final_result.final
+        final_answer = str(final.get("answer")) if final.get("answer") is not None else None
+        citations = list(final.get("citations") or [])
         meta["round3"] = {
             **final_result.meta,
             "evidence_items": len(evidence),
@@ -240,13 +281,25 @@ def run_rlm(
         meta=meta,
         events=events,
         glimpses=glimpses,
+        glimpses_meta=glimpses_meta,
         subcalls=subcalls,
         final=final,
+        final_answer=final_answer,
+        citations=citations,
         status=status,
         errors=errors,
     )
 
-    return RunResult(run_id=run_id, status=status, final=final)
+    return RunResult(
+        run_id=run_id,
+        status=status,
+        final=final,
+        program=program,
+        glimpses=glimpses,
+        subcalls=subcalls,
+        final_answer=final_answer,
+        citations=citations,
+    )
 import json
 from dataclasses import dataclass
 from typing import Any, Iterable
