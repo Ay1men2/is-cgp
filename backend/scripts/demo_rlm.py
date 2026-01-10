@@ -81,41 +81,40 @@ def _insert_artifacts(conn, project_id: str, session_id: str) -> list[str]:
     inserted_ids: list[str] = []
     for artifact in artifacts:
         content = artifact["content"]
-        row = conn.execute(
-            text(
-                """
-                insert into artifacts (
-                    project_id,
-                    session_id,
-                    scope,
-                    type,
-                    title,
-                    content,
-                    content_hash,
-                    token_estimate,
-                    metadata,
-                    source,
-                    status,
-                    created_at,
-                    updated_at
-                ) values (
-                    :project_id,
-                    :session_id,
-                    :scope,
-                    :type,
-                    :title,
-                    :content,
-                    :content_hash,
-                    :token_estimate,
-                    :metadata::jsonb,
-                    :source,
-                    'active',
-                    :created_at,
-                    :updated_at
-                )
-                returning id::text as id
-                """
-            ),
+        row = conn.exec_driver_sql(
+            """
+            insert into artifacts (
+                project_id,
+                session_id,
+                scope,
+                type,
+                title,
+                content,
+                content_hash,
+                token_estimate,
+                metadata,
+                source,
+                status,
+                created_at,
+                updated_at
+            ) values (
+                %(project_id)s,
+                %(session_id)s,
+                %(scope)s,
+                %(type)s,
+                %(title)s,
+                %(content)s,
+                %(content_hash)s,
+                %(token_estimate)s,
+                COALESCE(%(metadata)s, '{}')::jsonb,
+                %(source)s,
+                'active',
+                %(created_at)s,
+                %(updated_at)s
+            )
+            on conflict do nothing
+            returning id::text as id
+            """,
             {
                 "project_id": project_id,
                 "session_id": artifact["session_id"],
@@ -130,7 +129,30 @@ def _insert_artifacts(conn, project_id: str, session_id: str) -> list[str]:
                 "created_at": now,
                 "updated_at": now,
             },
-        ).mappings().one()
+        ).mappings().first()
+        if not row:
+            row = conn.execute(
+                text(
+                    """
+                    select id::text as id
+                    from artifacts
+                    where project_id = :project_id
+                      and scope = :scope
+                      and type = :type
+                      and session_id is not distinct from :session_id
+                      and content_hash = :content_hash
+                      and status = 'active'
+                    limit 1
+                    """
+                ),
+                {
+                    "project_id": project_id,
+                    "session_id": artifact["session_id"],
+                    "scope": artifact["scope"],
+                    "type": artifact["type"],
+                    "content_hash": _hash_content(content),
+                },
+            ).mappings().one()
         inserted_ids.append(row["id"])
 
     return inserted_ids
@@ -215,6 +237,34 @@ def _print_run_summary_from_result(result: RunResult) -> None:
     print(f"  final_answer preview: {final_preview}")
 
 
+def _print_rounds_for_run(run_id: str) -> None:
+    engine = get_engine()
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("select meta from rlm_runs where id = :run_id"),
+            {"run_id": run_id},
+        ).mappings().first()
+    if not row:
+        print("Round metadata: not found")
+        return
+    meta = row.get("meta") or {}
+    if not isinstance(meta, dict) or not meta:
+        print("Round metadata: empty")
+        return
+    print("Round metadata summary:")
+    for key in ("round1", "round2", "round3"):
+        info = meta.get(key) or {}
+        stage = info.get("stage") or "unknown"
+        mode = info.get("mode")
+        status = info.get("status")
+        details = [f"stage={stage}"]
+        if mode:
+            details.append(f"mode={mode}")
+        if status:
+            details.append(f"status={status}")
+        print(f"  {key}: {', '.join(details)}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Demo RLM run flow")
     parser.add_argument("--project", default="demo-rlm", help="project name")
@@ -238,6 +288,7 @@ def main() -> int:
     try:
         resp = _call_run(args.base_url, session_id, args.query)
         _print_run_summary(resp)
+        _print_rounds_for_run(resp.get("run_id"))
     except Exception as exc:  # noqa: BLE001 - demo script should surface error
         print(f"Failed to call run API at {args.base_url}: {exc}", file=sys.stderr)
         print(
@@ -250,6 +301,7 @@ def main() -> int:
         try:
             direct_result = _direct_run(session_id, args.query)
             _print_run_summary_from_result(direct_result)
+            _print_rounds_for_run(direct_result.run_id)
         except Exception as direct_exc:  # noqa: BLE001 - demo script should surface error
             print(f"Direct runner invocation failed: {direct_exc}", file=sys.stderr)
             return 1

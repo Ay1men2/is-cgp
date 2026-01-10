@@ -97,7 +97,7 @@ class RlmRepoSQL:
 
         # 关键点：
         # 1) 不要用 :session_id::uuid / :project_id::uuid
-        # 2) tokens 不强贴 ::text[]，直接 unnest(:tokens)，让驱动适配 array
+        # 2) array 参数显式 cast 为 text[]，避免 Postgres unnest/ANY 识别为 unknown
         # 3) session scope 需要 session_id 约束；project/global 不需要
         sql = text(
             """
@@ -115,15 +115,16 @@ class RlmRepoSQL:
 
                 (
                     SELECT count(*)
-                    FROM unnest(:tokens) AS t
-                    WHERE content ILIKE ('%' || t || '%')
+                    FROM unnest(CAST(:tokens AS text[])) AS t(token)
+                    WHERE content ILIKE ('%' || token || '%')
                 ) AS hit_count
 
             FROM artifacts
             WHERE status = 'active'
               AND project_id = :project_id
-              AND scope = ANY(:scopes)
-              AND (:allowed_types IS NULL OR type = ANY(:allowed_types))
+              AND scope = ANY(CAST(:scopes AS text[]))
+              AND (CAST(:allowed_types AS text[]) IS NULL
+                   OR type = ANY(CAST(:allowed_types AS text[])))
               AND (
                     (scope = 'session' AND session_id = :session_id)
                  OR (scope <> 'session')
@@ -194,8 +195,7 @@ class RlmRepoSQL:
     ) -> str:
         """
         写入一条 rlm_runs 记录（v0：只落 options + candidate_index）
-        这里的 jsonb cast 不会触发你遇到的 :param::type 问题，因为我们是对 SQL literal cast：
-        :options::jsonb OK（注意：这是在 VALUES 里，属于 SQL 表达式；不是 WHERE 里 :id::uuid 那种）
+        这里使用 CAST(:param AS jsonb) 避免 SQLAlchemy text() 的 :param::type 解析问题。
         """
         options = options or {}
         candidate_index = candidate_index or {}
@@ -204,7 +204,7 @@ class RlmRepoSQL:
                 text(
                     """
                     INSERT INTO rlm_runs (session_id, query, options, candidate_index, status)
-                    VALUES (:session_id, :query, :options::jsonb, :candidate_index::jsonb, 'ok')
+                    VALUES (:session_id, :query, CAST(:options AS jsonb), CAST(:candidate_index AS jsonb), 'ok')
                     RETURNING id::text AS id
                     """
                 ),
@@ -240,9 +240,9 @@ class RlmRepoSQL:
                     """
                     UPDATE rlm_runs
                     SET
-                        rounds = COALESCE(rounds, '[]'::jsonb) || :round_payload::jsonb,
-                        llm_raw = COALESCE(llm_raw, '[]'::jsonb) || :llm_raw_append::jsonb,
-                        errors = COALESCE(errors, '[]'::jsonb) || :errors_append::jsonb
+                        rounds = COALESCE(rounds, '[]'::jsonb) || CAST(:round_payload AS jsonb),
+                        llm_raw = COALESCE(llm_raw, '[]'::jsonb) || CAST(:llm_raw_append AS jsonb),
+                        errors = COALESCE(errors, '[]'::jsonb) || CAST(:errors_append AS jsonb)
                     WHERE id = :run_id
                     """
                 ),
@@ -263,37 +263,49 @@ class RlmRepoSQL:
         params: dict[str, Any] = {"run_id": run_id}
 
         if "program" in patch_jsonb:
-            update_clauses.append("program = :program::jsonb")
+            update_clauses.append("program = CAST(:program AS jsonb)")
             params["program"] = json.dumps(patch_jsonb.get("program") or [])
         if "program_meta" in patch_jsonb:
-            update_clauses.append("program_meta = :program_meta::jsonb")
+            update_clauses.append("program_meta = CAST(:program_meta AS jsonb)")
             params["program_meta"] = json.dumps(patch_jsonb.get("program_meta") or {})
         if "events" in patch_jsonb:
-            update_clauses.append("events = COALESCE(events, '[]'::jsonb) || :events::jsonb")
+            update_clauses.append(
+                "events = COALESCE(events, '[]'::jsonb) || CAST(:events AS jsonb)"
+            )
             params["events"] = json.dumps(events_payload)
         if "glimpses" in patch_jsonb:
-            update_clauses.append("glimpses = COALESCE(glimpses, '[]'::jsonb) || :glimpses::jsonb")
+            update_clauses.append(
+                "glimpses = COALESCE(glimpses, '[]'::jsonb) || CAST(:glimpses AS jsonb)"
+            )
             params["glimpses"] = json.dumps(self._normalize_list_payload(patch_jsonb.get("glimpses")))
         if "subcalls" in patch_jsonb:
-            update_clauses.append("subcalls = COALESCE(subcalls, '[]'::jsonb) || :subcalls::jsonb")
+            update_clauses.append(
+                "subcalls = COALESCE(subcalls, '[]'::jsonb) || CAST(:subcalls AS jsonb)"
+            )
             params["subcalls"] = json.dumps(self._normalize_list_payload(patch_jsonb.get("subcalls")))
         if "evidence" in patch_jsonb:
-            update_clauses.append("evidence = COALESCE(evidence, '[]'::jsonb) || :evidence::jsonb")
+            update_clauses.append(
+                "evidence = COALESCE(evidence, '[]'::jsonb) || CAST(:evidence AS jsonb)"
+            )
             params["evidence"] = json.dumps(self._normalize_list_payload(patch_jsonb.get("evidence")))
         if "final_answer" in patch_jsonb:
             update_clauses.append("final_answer = :final_answer")
             params["final_answer"] = patch_jsonb.get("final_answer")
         if "citations" in patch_jsonb:
-            update_clauses.append("citations = COALESCE(citations, '[]'::jsonb) || :citations::jsonb")
+            update_clauses.append(
+                "citations = COALESCE(citations, '[]'::jsonb) || CAST(:citations AS jsonb)"
+            )
             params["citations"] = json.dumps(self._normalize_list_payload(patch_jsonb.get("citations")))
         if "options" in patch_jsonb:
-            update_clauses.append("options = :options::jsonb")
+            update_clauses.append("options = CAST(:options AS jsonb)")
             params["options"] = json.dumps(patch_jsonb.get("options") or {})
         if "candidate_index" in patch_jsonb:
-            update_clauses.append("candidate_index = :candidate_index::jsonb")
+            update_clauses.append("candidate_index = CAST(:candidate_index AS jsonb)")
             params["candidate_index"] = json.dumps(patch_jsonb.get("candidate_index") or {})
         if "errors" in patch_jsonb:
-            update_clauses.append("errors = COALESCE(errors, '[]'::jsonb) || :errors::jsonb")
+            update_clauses.append(
+                "errors = COALESCE(errors, '[]'::jsonb) || CAST(:errors AS jsonb)"
+            )
             params["errors"] = json.dumps(self._normalize_list_payload(patch_jsonb.get("errors")))
         if "status" in patch_jsonb:
             update_clauses.append("status = :status")
@@ -308,7 +320,7 @@ class RlmRepoSQL:
                     text(
                         """
                         INSERT INTO rlm_run_events (run_id, event)
-                        VALUES (:run_id, :event::jsonb)
+                        VALUES (:run_id, CAST(:event AS jsonb))
                         """
                     ),
                     [
@@ -345,10 +357,10 @@ class RlmRepoSQL:
                     """
                     UPDATE rlm_runs
                     SET
-                        assembled_context = :assembled_context::jsonb,
+                        assembled_context = CAST(:assembled_context AS jsonb),
                         rendered_prompt = :rendered_prompt,
                         status = :status,
-                        errors = :errors::jsonb
+                        errors = CAST(:errors AS jsonb)
                     WHERE id = :run_id
                     """
                 ),
@@ -388,18 +400,18 @@ class RlmRepoSQL:
                     """
                     UPDATE rlm_runs
                     SET
-                        program = :program::jsonb,
-                        meta = :meta::jsonb,
-                        events = :events::jsonb,
-                        glimpses = :glimpses::jsonb,
-                        glimpses_meta = :glimpses_meta::jsonb,
-                        subcalls = :subcalls::jsonb,
-                        evidence = :evidence::jsonb,
-                        final = :final::jsonb,
+                        program = CAST(:program AS jsonb),
+                        meta = CAST(:meta AS jsonb),
+                        events = CAST(:events AS jsonb),
+                        glimpses = CAST(:glimpses AS jsonb),
+                        glimpses_meta = CAST(:glimpses_meta AS jsonb),
+                        subcalls = CAST(:subcalls AS jsonb),
+                        evidence = CAST(:evidence AS jsonb),
+                        final = CAST(:final AS jsonb),
                         final_answer = :final_answer,
-                        citations = :citations::jsonb,
+                        citations = CAST(:citations AS jsonb),
                         status = :status,
-                        errors = :errors::jsonb
+                        errors = CAST(:errors AS jsonb)
                     WHERE id = :run_id
                     """
                 ),
