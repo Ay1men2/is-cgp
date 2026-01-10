@@ -10,7 +10,7 @@ from sqlalchemy.engine import Engine
 
 from app.rlm.adapters.repos_sql import RlmRepoSQL
 from app.rlm.services.retrieval import build_candidate_index
-from app.rlm.services.runs import create_minimal_run
+from app.rlm.services.runner import run_rlm
 
 router = APIRouter(prefix="/rlm", tags=["rlm"])
 
@@ -38,6 +38,7 @@ class RlmRunReq(BaseModel):
 class RlmRunResp(BaseModel):
     run_id: str
     status: str = "ok"
+    final: dict[str, Any] = Field(default_factory=dict)
 
 
 @router.post("/assemble", response_model=RlmAssembleResp)
@@ -64,3 +65,15 @@ def rlm_assemble(req: RlmAssembleReq, engine: Engine = Depends(get_engine)) -> R
         rounds_summary=[],
         rendered_prompt=None,
     )
+
+
+@router.post("/run", response_model=RlmRunResp)
+def rlm_run(req: RlmRunReq, engine: Engine = Depends(get_engine)) -> RlmRunResp:
+    repo = RlmRepoSQL(engine)
+
+    try:
+        result = run_rlm(repo, req.session_id, req.query, req.options)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return RlmRunResp(run_id=result.run_id, status=result.status, final=result.final)
