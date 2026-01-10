@@ -10,6 +10,7 @@ from sqlalchemy.engine import Engine
 
 from app.rlm.adapters.repos_sql import RlmRepoSQL
 from app.rlm.services.retrieval import build_candidate_index
+from app.rlm.services.runner import build_limits_snapshot, run_program
 from app.rlm.services.runs import create_minimal_run
 
 router = APIRouter(prefix="/rlm", tags=["rlm"])
@@ -49,18 +50,33 @@ def rlm_assemble(req: RlmAssembleReq, engine: Engine = Depends(get_engine)) -> R
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    # v0：assembled_context/rounds_summary 先不做，先把环境状态落库
+    options_snapshot = dict(req.options)
+    limits = build_limits_snapshot(options_snapshot)
+    if "limits" in options_snapshot:
+        options_snapshot["limits_snapshot"] = limits
+    else:
+        options_snapshot["limits"] = limits
+
     run_id = repo.insert_run(
         session_id=req.session_id,
         query=req.query,
-        options=req.options,
+        options=options_snapshot,
         candidate_index=idx.model_dump(),
+    )
+
+    outcome = run_program(idx, options_snapshot, limits=limits)
+    repo.finish_run(
+        run_id=run_id,
+        assembled_context=outcome.assembled_context,
+        rendered_prompt=None,
+        status=outcome.status,
+        errors=outcome.errors,
     )
 
     return RlmAssembleResp(
         run_id=run_id,
-        status="ok",
-        assembled_context={},
+        status=outcome.status,
+        assembled_context=outcome.assembled_context,
         rounds_summary=[],
         rendered_prompt=None,
     )
