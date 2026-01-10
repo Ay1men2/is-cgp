@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from app.config import settings
 from app.rlm.adapters.repos_sql import RlmRepoSQL
 from app.rlm.domain.models import CandidateIndex
 from app.rlm.services.retrieval import build_candidate_index
@@ -123,7 +124,7 @@ class MockExecutor:
         program: dict[str, Any],
         index: CandidateIndex,
         options: dict[str, Any],
-    ) -> ExecutionResult:
+        ) -> ExecutionResult:
         return ExecutionResult(
             events=list(options.get("events") or []),
             glimpses=list(options.get("glimpses") or []),
@@ -131,6 +132,114 @@ class MockExecutor:
             variables=dict(options.get("vars") or {}),
             status=str(options.get("executor_status") or "ok"),
             meta={"mode": "mock", "program_summary": program.get("steps")},
+        )
+
+
+_DEBUG_ALLOWED_ENVS = {"internal", "dev"}
+_DEBUG_OPTION_KEYS = {
+    "program",
+    "final_answer",
+    "citations",
+    "events",
+    "glimpses",
+    "glimpses_meta",
+    "subcalls",
+    "vars",
+    "executor_status",
+    "debug",
+    "debug_token",
+}
+
+
+def _debug_options_allowed(options: dict[str, Any]) -> bool:
+    if not options.get("debug"):
+        return False
+    if settings.app_env not in _DEBUG_ALLOWED_ENVS:
+        return False
+    if not settings.rlm_debug_options_enabled:
+        return False
+    if settings.rlm_debug_token:
+        return options.get("debug_token") == settings.rlm_debug_token
+    return True
+
+
+def _strip_debug_options(options: dict[str, Any]) -> dict[str, Any]:
+    if not options:
+        return {}
+    sanitized = dict(options)
+    for key in _DEBUG_OPTION_KEYS:
+        sanitized.pop(key, None)
+    return sanitized
+
+
+class DefaultProgramExecutor:
+    def execute(
+        self,
+        program: dict[str, Any],
+        index: CandidateIndex,
+        options: dict[str, Any],
+    ) -> ExecutionResult:
+        limits = build_limits_snapshot(options)
+        try:
+            steps = list(_extract_program(program))
+            _check_limits(steps, limits)
+        except ProgramLimitError as exc:
+            return ExecutionResult(
+                events=[],
+                glimpses=[],
+                subcalls=[],
+                variables={},
+                status="stopped",
+                meta={
+                    "mode": "program",
+                    "errors": [
+                        {
+                            "type": "limit_exceeded",
+                            "limit": exc.limit,
+                            "value": exc.value,
+                            "max": exc.max_value,
+                        }
+                    ],
+                },
+            )
+        except (ProgramParseError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            return ExecutionResult(
+                events=[],
+                glimpses=[],
+                subcalls=[],
+                variables={},
+                status="error",
+                meta={
+                    "mode": "program",
+                    "errors": [
+                        {"type": "program_parse_failed", "message": str(exc)},
+                    ],
+                },
+            )
+
+        executor = RlmProgramExecutor(
+            ExecutionLimits(
+                max_steps=limits["max_steps"],
+                max_subcalls=limits["max_subcalls"],
+                max_depth=limits["max_depth"],
+                max_event_errors=limits["max_event_errors"],
+            )
+        )
+        execution = executor.execute(steps)
+        status = "ok"
+        if execution.stopped:
+            status = "stopped"
+        return ExecutionResult(
+            events=[event.to_dict() for event in execution.events],
+            glimpses=[],
+            subcalls=[],
+            variables={"selected_ids": list(execution.selected_ids)},
+            status=status,
+            meta={
+                "mode": "program",
+                "errors": list(execution.errors),
+                "selected_ids": list(execution.selected_ids),
+            },
         )
 
 
@@ -144,8 +253,12 @@ def run_rlm(
     executor: ProgramExecutor | None = None,
 ) -> RunResult:
     options = options or {}
+    debug_allowed = _debug_options_allowed(options)
+    if not debug_allowed:
+        options = _strip_debug_options(options)
     rootlm = rootlm or MockRootLM()
-    executor = executor or MockExecutor()
+    if executor is None:
+        executor = MockExecutor() if debug_allowed else DefaultProgramExecutor()
 
     index = build_candidate_index(repo, session_id, query, options)
     run_id = repo.insert_run(
@@ -305,7 +418,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 from app.rlm.domain.models import Candidate, CandidateIndex
-from app.rlm.services.executor import ExecutionLimits, ProgramExecutor
+from app.rlm.services.executor import ExecutionLimits, ProgramExecutor as RlmProgramExecutor
 
 
 _DEFAULT_LIMITS = {
@@ -498,7 +611,7 @@ def run_program(
             degraded=True,
         )
 
-    executor = ProgramExecutor(
+    executor = RlmProgramExecutor(
         ExecutionLimits(
             max_steps=limits["max_steps"],
             max_subcalls=limits["max_subcalls"],
