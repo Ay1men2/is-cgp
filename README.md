@@ -1,7 +1,3 @@
-
----
-
-```md
 # IS-CGP — 智安对话治理平台
 
 **Intelligent Secure Conversation Governance Platform**
@@ -85,7 +81,7 @@ IS-CGP
 模型推理后端
 (vLLM / llama.cpp / others)
 
-````
+```
 
 IS-CGP 与推理引擎 **完全解耦**，通过 adapter 方式接入。
 
@@ -220,7 +216,7 @@ docker compose -f infra/docker-compose.yml down -v
 docker compose -f infra/docker-compose.yml up -d --build
 docker compose -f infra/docker-compose.yml --profile demo run --rm --no-deps demo
 docker compose -f infra/docker-compose.yml down -v
-````
+```
 
 Notes：
 
@@ -240,8 +236,4 @@ Apache License 2.0
 “IS-CGP（Intelligent Secure Conversation Governance Platform）”为项目名称。
 Fork 或衍生项目不得在未授权情况下使用该名称暗示官方关系。
 
-```
-
 ---
-
-
