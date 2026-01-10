@@ -113,6 +113,15 @@ IS-CGP 与推理引擎完全解耦，适配器可替换。
 
 ---
 
+## Quickstart (Local)
+
+1. `cp .env.example .env`
+2. `docker compose -f infra/docker-compose.yml up -d --build`
+3. `docker compose -f infra/docker-compose.yml run --rm demo`
+4. `docker compose -f infra/docker-compose.yml down -v`
+
+---
+
 ## License
 
 Apache License 2.0
