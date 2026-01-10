@@ -45,6 +45,7 @@ services:
       - ../backend:/app
     environment:
       TZ: ${TZ:-Asia/Shanghai}
+      PYTHONPATH: /app
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://iscpg:iscpg_pwd_change_me@postgres:5432/iscpg}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
     depends_on:
@@ -69,7 +70,33 @@ services:
       timeout: 3s
       retries: 3
 
+  demo:
+    image: python:3.12-slim
+    container_name: is-cpg-demo
+    restart: "no"
+    working_dir: /app
+    volumes:
+      - ../backend:/app
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      PYTHONPATH: /app
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://iscpg:iscpg_pwd_change_me@postgres:5432/iscpg}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      RLM_BASE_URL: ${RLM_BASE_URL:-http://backend:8000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    command:
+      - bash
+      - -lc
+      - |
+        pip install --no-cache-dir -r requirements.txt
+        python scripts/demo_rlm.py
+
 volumes:
   pg_data:
   redis_data:
-

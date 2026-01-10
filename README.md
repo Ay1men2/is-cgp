@@ -119,6 +119,9 @@ IS-CGP 与推理引擎完全解耦，适配器可替换。
 2. `docker compose -f infra/docker-compose.yml up -d --build`
 3. `docker compose -f infra/docker-compose.yml run --rm demo`
 4. `docker compose -f infra/docker-compose.yml down -v`
+## Quickstart
+
+- 重置开发环境（停止并移除数据卷）：`./scripts/reset_dev.sh`
 
 ---
 
