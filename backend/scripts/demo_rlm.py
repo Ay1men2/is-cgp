@@ -159,7 +159,11 @@ def _insert_artifacts(conn, project_id: str, session_id: str) -> list[str]:
 
 
 def _call_run(base_url: str, session_id: str, query: str) -> dict:
-    payload = {"session_id": session_id, "query": query, "options": {}}
+    payload = {
+        "session_id": session_id,
+        "query": query,
+        "options": {"executor_backend": "real"},
+    }
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         f"{base_url.rstrip('/')}/v1/rlm/run",
@@ -173,7 +177,7 @@ def _call_run(base_url: str, session_id: str, query: str) -> dict:
 def _direct_run(session_id: str, query: str) -> RunResult:
     engine = get_engine()
     repo = RlmRepoSQL(engine)
-    return run_rlm(repo, session_id, query, {})
+    return run_rlm(repo, session_id, query, {"executor_backend": "real"})
 
 
 def _summarize_program(program: dict) -> str:
