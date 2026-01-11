@@ -8,8 +8,26 @@ import os
 import sys
 import urllib.request
 from datetime import datetime, timezone
+from pathlib import Path
 
 from sqlalchemy import text
+
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+_DEMO_DEFAULT_DB = "postgresql+psycopg://iscpg:iscpg_pwd_change_me@127.0.0.1:5432/iscpg"
+_DEMO_DEFAULT_REDIS = "redis://127.0.0.1:6379/0"
+_missing_env: list[str] = []
+if not os.getenv("DATABASE_URL"):
+    os.environ["DATABASE_URL"] = _DEMO_DEFAULT_DB
+    _missing_env.append("DATABASE_URL")
+if not os.getenv("REDIS_URL"):
+    os.environ["REDIS_URL"] = _DEMO_DEFAULT_REDIS
+    _missing_env.append("REDIS_URL")
+if _missing_env:
+    joined = ", ".join(_missing_env)
+    print(f"Warning: {joined} not set; using demo defaults.", file=sys.stderr)
 
 from app.deps import get_engine
 from app.rlm.adapters.repos_sql import RlmRepoSQL
@@ -261,11 +279,17 @@ def _print_rounds_for_run(run_id: str) -> None:
         stage = info.get("stage") or "unknown"
         mode = info.get("mode")
         status = info.get("status")
+        fallback_reason = info.get("fallback_reason")
+        fallback_from = info.get("fallback_from")
         details = [f"stage={stage}"]
         if mode:
             details.append(f"mode={mode}")
         if status:
             details.append(f"status={status}")
+        if fallback_from:
+            details.append(f"fallback_from={fallback_from}")
+        if fallback_reason:
+            details.append(f"fallback_reason={fallback_reason}")
         print(f"  {key}: {', '.join(details)}")
 
 

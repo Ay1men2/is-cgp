@@ -82,3 +82,22 @@ def test_run_rlm_with_real_executor(monkeypatch, tmp_path) -> None:
     assert result.status == "ok"
     assert result.final_answer
     assert result.glimpses
+
+
+def test_run_rlm_decision_vllm_fallback(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("RLM_TRACE_DIR", str(tmp_path))
+    repo = _FakeRepo()
+    options = {
+        "executor_backend": "real",
+        "rootlm_backend": "vllm",
+        "vllm_base_url": "http://127.0.0.1:1/v1",
+        "vllm_model": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    }
+    result = run_rlm(repo, "s1", "what is this?", options)
+
+    steps = result.program.get("steps") if isinstance(result.program, dict) else None
+    assert result.status == "ok"
+    assert isinstance(steps, list) and len(steps) >= 1
+    assert len(result.glimpses) >= 1
+    assert result.final_answer
+    assert result.final_answer.startswith("Mock answer for:")

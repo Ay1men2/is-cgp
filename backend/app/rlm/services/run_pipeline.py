@@ -437,6 +437,28 @@ def _select_rootlm(options: dict[str, Any]) -> RootLMClient:
     raise ValueError(f"unsupported rootlm backend: {backend}")
 
 
+def _normalize_vllm_base_url(value: str) -> str:
+    trimmed = value.rstrip("/")
+    if trimmed.endswith("/v1"):
+        trimmed = trimmed[:-3]
+    return trimmed
+
+
+def _resolve_decision_vllm_config(options: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+    config = dict(_resolve_vllm_config(options))
+    missing: list[str] = []
+    base_url = config.get("base_url")
+    if base_url:
+        config["base_url"] = _normalize_vllm_base_url(str(base_url))
+    if not config.get("base_url"):
+        missing.append("VLLM_BASE_URL")
+    if not config.get("model"):
+        missing.append("VLLM_MODEL")
+    if missing:
+        return None, f"vllm_missing_config: {', '.join(missing)}"
+    return config, None
+
+
 def run_rlm(
     repo: RlmRepoSQL,
     session_id: str,
@@ -447,7 +469,29 @@ def run_rlm(
     executor: ProgramExecutor | None = None,
 ) -> RunResult:
     options = options or {}
-    rootlm = rootlm or _select_rootlm(options)
+    # NOTE: Decision stage can use vLLM; plan remains mock until a later milestone.
+    plan_rootlm = rootlm or MockRootLM()
+    decision_backend = str(options.get("rootlm_backend") or settings.rlm_rootlm_backend or "mock")
+    decision_backend = decision_backend.strip().lower()
+    decision_rootlm: RootLMClient = MockRootLM()
+    decision_mode = "mock"
+    decision_fallback_reason: str | None = None
+    if decision_backend == "vllm":
+        config, decision_fallback_reason = _resolve_decision_vllm_config(options)
+        if config:
+            try:
+                decision_rootlm = VllmRootLM(
+                    base_url=config["base_url"],
+                    api_key=config["api_key"],
+                    model=config["model"],
+                    max_tokens=config["max_tokens"],
+                    temperature=config["temperature"],
+                )
+                decision_mode = "vllm"
+            except Exception as exc:
+                decision_fallback_reason = f"vllm_init_failed: {exc}"
+                decision_rootlm = MockRootLM()
+                decision_mode = "mock"
 
     index = build_candidate_index(repo, session_id, query, options)
     run_id = repo.insert_run(
@@ -486,7 +530,7 @@ def run_rlm(
     try:
         policy = dict(options.get("policy") or {})
         limits = dict(options.get("limits") or {})
-        program_result = rootlm.generate_program(index, policy, limits, options)
+        program_result = plan_rootlm.generate_program(index, policy, limits, options)
         program = program_result.program
         meta["round1"] = {
             **program_result.meta,
@@ -603,17 +647,36 @@ def run_rlm(
         )
 
     decision_error: dict[str, Any] | None = None
+    decision_trace_meta: dict[str, Any] = {"status": status, "mode": decision_mode}
+    if decision_fallback_reason:
+        decision_trace_meta["fallback_reason"] = decision_fallback_reason
     try:
         evidence = _build_evidence(events, glimpses, subcalls)
-        final_result = rootlm.generate_final(index, evidence, subcalls, options)
+        final_result: RootLMFinalResult | None = None
+        if decision_mode == "vllm":
+            try:
+                final_result = decision_rootlm.generate_final(index, evidence, subcalls, options)
+            except Exception as exc:
+                decision_fallback_reason = f"vllm_request_failed: {exc}"
+                decision_mode = "mock"
+                decision_rootlm = MockRootLM()
+        if final_result is None:
+            final_result = decision_rootlm.generate_final(index, evidence, subcalls, options)
         final = final_result.final
         final_answer = str(final.get("answer")) if final.get("answer") is not None else None
         citations = list(final.get("citations") or [])
-        meta["round3"] = {
+        round3_meta = {
             **final_result.meta,
             "evidence_items": len(evidence),
             "stage": "decision",
         }
+        if decision_fallback_reason:
+            round3_meta["fallback_reason"] = decision_fallback_reason
+            round3_meta["fallback_from"] = "vllm"
+        meta["round3"] = round3_meta
+        decision_trace_meta = {"status": status, "mode": round3_meta.get("mode")}
+        if decision_fallback_reason:
+            decision_trace_meta["fallback_reason"] = decision_fallback_reason
     except Exception as exc:
         status = "error"
         errors.append({"stage": "round3", "error": str(exc)})
@@ -637,7 +700,7 @@ def run_rlm(
     trace_logger.append(
         stage="decision",
         payload=_summarize_decision_trace(final_answer, citations, final),
-        meta={"status": status},
+        meta=decision_trace_meta,
     )
     if decision_error:
         trace_logger.append_error(
