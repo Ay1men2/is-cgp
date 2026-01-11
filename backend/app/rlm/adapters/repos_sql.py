@@ -185,6 +185,55 @@ class RlmRepoSQL:
             candidates=candidates,
         )
 
+    def _fetch_artifact_row(self, artifact_id: str) -> dict[str, Any] | None:
+        sql = text(
+            """
+            SELECT
+                id::text AS artifact_id,
+                content,
+                content_hash,
+                metadata
+            FROM artifacts
+            WHERE id = :artifact_id
+            LIMIT 1
+            """
+        )
+        with self.engine.connect() as conn:
+            row = conn.execute(sql, {"artifact_id": artifact_id}).mappings().first()
+        if not row:
+            return None
+        return {
+            "artifact_id": row["artifact_id"],
+            "content": row["content"],
+            "content_hash": row["content_hash"],
+            "metadata": row.get("metadata") or {},
+        }
+
+    def get_artifact_text(self, artifact_id: str) -> str | None:
+        """
+        返回 artifacts.content 全文；未找到返回 None。
+        """
+        row = self._fetch_artifact_row(artifact_id)
+        if not row:
+            return None
+        content = row.get("content")
+        if not isinstance(content, str) or not content:
+            return None
+        return content
+
+    def get_artifact_metadata(self, artifact_id: str) -> dict[str, Any]:
+        """
+        返回 artifacts metadata 与 content_hash（未找到返回空 dict）。
+        """
+        row = self._fetch_artifact_row(artifact_id)
+        if not row:
+            return {}
+        return {
+            "artifact_id": row.get("artifact_id"),
+            "content_hash": row.get("content_hash"),
+            "metadata": row.get("metadata") or {},
+        }
+
     # --- rlm_runs write (minimal) ---
     def insert_run(
         self,
