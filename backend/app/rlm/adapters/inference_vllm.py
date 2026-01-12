@@ -1,20 +1,22 @@
 from __future__ import annotations
 
 import json
-import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, replace
 from typing import Any, Iterable, Mapping
+import os
+import sys
+import time
 
 from app.rlm.adapters.inference_adapter import InferenceAdapter
 
 
 @dataclass(frozen=True)
 class RetryPolicy:
-    timeout_s: float = 30.0
-    max_retries: int = 2
-    backoff_s: float = 1.0
+    timeout_s: float = 20.0
+    max_retries: int = 1
+    backoff_s: float = 0.5
 
 
 class VllmChatCompletionsClient:
@@ -62,16 +64,52 @@ class VllmChatCompletionsClient:
             headers["Authorization"] = f"Bearer {self._api_key}"
 
         last_error: Exception | None = None
+        debug = os.getenv("VLLM_DEBUG") == "1"
+        if debug:
+            payload_size = sum(len(str(m.get("content", ""))) for m in payload.get("messages", []))
+            msg_lens = [len(str(m.get("content", ""))) for m in payload.get("messages", [])]
+            snippets = [
+                f"{m.get('role','?')}[{len(str(m.get('content','')))}]: {str(m.get('content',''))[:80].replace(chr(10),' ')}"
+                for m in payload.get("messages", [])
+            ]
+            print(
+                f"[vllm] request url={url} timeout_s={self._retry.timeout_s} "
+                f"max_tokens={payload.get('max_tokens')} stop={payload.get('stop')} "
+                f"temp={payload.get('temperature')} top_p={payload.get('top_p')} "
+                f"messages={len(payload.get('messages', []))} lens={msg_lens} total_chars={payload_size}",
+                file=sys.stderr,
+            )
+            for snippet in snippets:
+                print(f"[vllm] msg {snippet}", file=sys.stderr)
         for attempt in range(self._retry.max_retries + 1):
             try:
                 request = urllib.request.Request(url, data=body, headers=headers, method="POST")
+                start = time.perf_counter()
                 with urllib.request.urlopen(request, timeout=self._retry.timeout_s) as response:
                     data = response.read().decode("utf-8")
-                return json.loads(data)
+                elapsed_ms = int((time.perf_counter() - start) * 1000)
+                parsed = json.loads(data)
+                if debug:
+                    print(
+                        f"[vllm] success latency_ms={elapsed_ms} content_len={len(data)}",
+                        file=sys.stderr,
+                    )
+                return parsed
             except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, ValueError) as exc:
                 last_error = exc
+                is_timeout = isinstance(exc, TimeoutError) or "timed out" in str(exc).lower()
+                if is_timeout:
+                    if debug:
+                        print(f"[vllm] timeout, no retry (attempt {attempt}) url={url}", file=sys.stderr)
+                    break
+                if isinstance(exc, urllib.error.HTTPError) and getattr(exc, "code", 0) < 500:
+                    if debug:
+                        print(f"[vllm] http {exc.code}, no retry url={url}", file=sys.stderr)
+                    break
                 if attempt >= self._retry.max_retries:
                     break
+                if debug:
+                    print(f"[vllm] retrying ({attempt+1}) url={url}", file=sys.stderr)
                 time.sleep(self._retry.backoff_s)
         raise RuntimeError(f"vLLM chat.completions failed after retries: {last_error}")
 
@@ -118,7 +156,13 @@ class InferenceVllmAdapter(InferenceAdapter):
         temperature = opts.get("temperature", self._default_temperature)
         stop = opts.get("stop") or self._default_stop
         extra = {**self._default_extra, **(opts.get("extra") or {})}
-        messages = [{"role": "user", "content": prompt}]
+        extra.setdefault("stream", False)
+        extra.setdefault("top_p", 1)
+        messages_override = opts.get("messages")
+        if isinstance(messages_override, list):
+            messages = messages_override
+        else:
+            messages = [{"role": "user", "content": prompt}]
 
         client = self._client
         if timeout_s is not None:

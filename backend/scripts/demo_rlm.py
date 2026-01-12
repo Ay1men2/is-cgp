@@ -9,6 +9,7 @@ import sys
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 
 from sqlalchemy import text
 
@@ -198,6 +199,30 @@ def _direct_run(session_id: str, query: str) -> RunResult:
     return run_rlm(repo, session_id, query, {"executor_backend": "real"})
 
 
+def _vllm_preflight() -> bool:
+    base_url = os.getenv("VLLM_BASE_URL")
+    model = os.getenv("VLLM_MODEL")
+    timeout_s = float(os.getenv("VLLM_TIMEOUT_S") or 3)
+    if not base_url or not model:
+        return False
+    url = f"{base_url.rstrip('/')}/chat/completions"
+    payload = json.dumps(
+        {
+            "model": model,
+            "messages": [{"role": "user", "content": "ping"}],
+            "max_tokens": 1,
+            "temperature": 0,
+            "stream": False,
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            return resp.status == 200
+    except (HTTPError, URLError, TimeoutError):
+        return False
+
+
 def _summarize_program(program: dict) -> str:
     if not program:
         return "none"
@@ -253,9 +278,12 @@ def _print_run_summary_from_result(result: RunResult) -> None:
     print("Run response summary:")
     print(f"  run_id: {result.run_id}")
     print(f"  status: {result.status}")
+    print("  plan_start … plan_end")
     print(f"  program/plan summary: {program_summary}")
+    print("  examine_start … examine_end")
     print(f"  glimpses count: {len(result.glimpses)}")
     print(f"  subcalls count: {len(result.subcalls)}")
+    print("  decision_start … decision_end")
     print(f"  final_answer preview: {final_preview}")
 
 
@@ -281,6 +309,8 @@ def _print_rounds_for_run(run_id: str) -> None:
         status = info.get("status")
         fallback_reason = info.get("fallback_reason")
         fallback_from = info.get("fallback_from")
+        timeout_s = info.get("timeout_s")
+        max_tokens = info.get("max_tokens")
         details = [f"stage={stage}"]
         if mode:
             details.append(f"mode={mode}")
@@ -290,6 +320,10 @@ def _print_rounds_for_run(run_id: str) -> None:
             details.append(f"fallback_from={fallback_from}")
         if fallback_reason:
             details.append(f"fallback_reason={fallback_reason}")
+        if timeout_s is not None:
+            details.append(f"timeout_s={timeout_s}")
+        if max_tokens is not None:
+            details.append(f"max_tokens={max_tokens}")
         print(f"  {key}: {', '.join(details)}")
 
 
@@ -312,6 +346,12 @@ def main() -> int:
 
     print(f"Inserted artifacts: {', '.join(artifact_ids)}")
     print(f"Session ID: {session_id}")
+    backend_mode = os.getenv("RLM_ROOTLM_BACKEND") or "mock"
+    if backend_mode == "vllm" and not _vllm_preflight():
+        print("Warning: vLLM preflight failed; forcing mock for this demo run.", file=sys.stderr)
+        backend_mode = "mock"
+        os.environ["RLM_ROOTLM_BACKEND"] = "mock"
+    print(f"Calling RootLM (plan/decision) backend={backend_mode} via API…", file=sys.stderr)
 
     try:
         resp = _call_run(args.base_url, session_id, args.query)

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from app.config import settings
-from app.rlm.adapters.inference_vllm import InferenceVllmAdapter
+from app.rlm.adapters.inference_vllm import InferenceVllmAdapter, RetryPolicy
 from app.rlm.adapters.repos_sql import RlmRepoSQL
 from app.rlm.domain.models import CandidateIndex
 from app.rlm.services.retrieval import build_candidate_index
@@ -166,18 +167,116 @@ def _resolve_vllm_config(options: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _resolve_vllm_timeout(options: dict[str, Any]) -> float:
+    raw = options.get("vllm_timeout_s") or os.getenv("VLLM_TIMEOUT_S")
+    try:
+        value = float(raw)
+        if value <= 0:
+            raise ValueError
+        return value
+    except Exception:
+        return 20.0
+
+
+def _resolve_plan_tokens(options: dict[str, Any]) -> int:
+    raw = options.get("vllm_plan_max_tokens") or os.getenv("VLLM_PLAN_MAX_TOKENS")
+    try:
+        val = int(raw)
+        if val <= 0:
+            raise ValueError
+        return min(val, 64)
+    except Exception:
+        return 64
+
+
+def _resolve_decision_tokens(options: dict[str, Any]) -> int:
+    raw = options.get("vllm_decision_max_tokens") or os.getenv("VLLM_DECISION_MAX_TOKENS")
+    try:
+        val = int(raw)
+        if val <= 0:
+            raise ValueError
+        return min(val, 16)
+    except Exception:
+        return 16
+
+
+def _truncate_evidence(evidence: list[dict[str, Any]], *, glimpse_limit: int = 400, total_limit: int = 1200) -> list[dict[str, Any]]:
+    total = 0
+    truncated: list[dict[str, Any]] = []
+    for item in evidence:
+        if "glimpses" in item and isinstance(item["glimpses"], list):
+            new_glimpses = []
+            for glimpse in item["glimpses"]:
+                text = str(glimpse.get("text") or "")
+                clipped = text[:glimpse_limit]
+                total += len(clipped)
+                new_glimpses.append({**glimpse, "text": clipped})
+                if total >= total_limit:
+                    break
+            truncated.append({"glimpses": new_glimpses})
+            if total >= total_limit:
+                break
+        else:
+            truncated.append(item)
+    return truncated
+
+
+def _build_compact_decision_messages(query: str, evidence: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    system_msg = "Reply in ONE line, <= 12 words. No explanations. Return JSON only."
+    question = (query or "").strip()
+    question = question[:200]
+    glimpse_text = ""
+    for item in evidence:
+        if "glimpses" in item and isinstance(item["glimpses"], list) and item["glimpses"]:
+            text = str(item["glimpses"][0].get("text") or "")
+            if text:
+                glimpse_text = text[:200]
+                break
+    messages = [
+        {"role": "system", "content": system_msg},
+        {"role": "user", "content": question or "Answer the question using evidence."},
+    ]
+    if glimpse_text:
+        messages.append({"role": "user", "content": f"Evidence: {glimpse_text}"})
+    total_chars = sum(len(m["content"]) for m in messages)
+    if total_chars > 450:
+        # Trim the last message to fit the budget
+        budget = 450 - (total_chars - len(messages[-1]["content"]))
+        if budget < 0:
+            budget = 0
+        messages[-1]["content"] = messages[-1]["content"][:budget]
+    return messages
+
+
 class VllmRootLM:
-    def __init__(self, *, base_url: str, api_key: str | None, model: str | None,
-                 max_tokens: int | None, temperature: float | None) -> None:
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        api_key: str | None,
+        model: str | None,
+        temperature: float | None,
+        stop: list[str] | None = None,
+        timeout_s: float = 20.0,
+        max_tokens: int | None = None,
+    ) -> None:
         if not base_url:
             raise ValueError("VLLM_BASE_URL is required when RLM_ROOTLM_BACKEND=vllm")
+        stop = ["\n"] + [s for s in (stop or ["\n\n", "```", "<END>"]) if s != "\n"]
         self._adapter = InferenceVllmAdapter(
             base_url=base_url,
             api_key=api_key,
             default_model=model,
             default_max_tokens=max_tokens,
             default_temperature=temperature,
+            default_stop=stop or ["\n\n", "```", "<END>"],
+            default_extra={"stream": False},
+            retry=RetryPolicy(timeout_s=timeout_s, max_retries=1, backoff_s=0.5),
         )
+        self._timeout_s = timeout_s
+        self._max_tokens = min(max_tokens or 128, 128)
+        self._stop = stop or ["\n\n", "```", "<END>"]
+        self._temperature = 0 if temperature is None else temperature
 
     def generate_program(
         self,
@@ -198,7 +297,11 @@ class VllmRootLM:
             "Schema: {\"program\": {\"steps\": [], \"candidate_ids\": [], \"policy\": {}, \"limits\": {}}}\n"
             f"Input: {json.dumps(payload, ensure_ascii=False)}"
         )
-        raw_text = self._adapter.generate(prompt)
+        raw_text = self._adapter.generate(
+            prompt,
+            timeout_s=self._timeout_s,
+            options={"max_tokens": self._max_tokens, "temperature": 0, "stop": self._stop},
+        )
         parsed = _extract_json_payload(raw_text)
         if parsed is None:
             program = {
@@ -209,12 +312,22 @@ class VllmRootLM:
             }
             return RootLMProgramResult(
                 program=program,
-                meta={"mode": "vllm", "parsed": False},
+                meta={
+                    "mode": "vllm",
+                    "parsed": False,
+                    "timeout_s": self._timeout_s,
+                    "max_tokens": self._max_tokens,
+                },
                 raw={"text": raw_text},
             )
         return RootLMProgramResult(
             program=parsed.get("program") or parsed,
-            meta={"mode": "vllm", "parsed": True},
+            meta={
+                "mode": "vllm",
+                "parsed": True,
+                "timeout_s": self._timeout_s,
+                "max_tokens": self._max_tokens,
+            },
             raw=parsed,
         )
 
@@ -230,23 +343,44 @@ class VllmRootLM:
             "evidence": evidence,
             "subcalls": subcalls,
         }
+        messages = _build_compact_decision_messages(index.query, evidence)
         prompt = (
-            "You are RootLM. Return JSON only.\n"
+            "You are RootLM. Reply in ONE line, <= 12 words. Do not add explanations.\n"
+            "Return JSON only.\n"
             "Schema: {\"final\": {\"answer\": \"\", \"citations\": []}}\n"
             f"Input: {json.dumps(payload, ensure_ascii=False)}"
         )
-        raw_text = self._adapter.generate(prompt)
+        raw_text = self._adapter.generate(
+            prompt,
+            timeout_s=self._timeout_s,
+            options={
+                "max_tokens": self._max_tokens,
+                "temperature": 0,
+                "stop": self._stop,
+                "messages": messages,
+            },
+        )
         parsed = _extract_json_payload(raw_text)
         if parsed is None:
             final = {"answer": raw_text.strip(), "citations": []}
             return RootLMFinalResult(
                 final=final,
-                meta={"mode": "vllm", "parsed": False},
+                meta={
+                    "mode": "vllm",
+                    "parsed": False,
+                    "timeout_s": self._timeout_s,
+                    "max_tokens": self._max_tokens,
+                },
                 raw={"text": raw_text},
             )
         return RootLMFinalResult(
             final=parsed.get("final") or parsed,
-            meta={"mode": "vllm", "parsed": True},
+            meta={
+                "mode": "vllm",
+                "parsed": True,
+                "timeout_s": self._timeout_s,
+                "max_tokens": self._max_tokens,
+            },
             raw=parsed,
         )
 
@@ -450,6 +584,7 @@ def _resolve_decision_vllm_config(options: dict[str, Any]) -> tuple[dict[str, An
     base_url = config.get("base_url")
     if base_url:
         config["base_url"] = _normalize_vllm_base_url(str(base_url))
+    config["timeout_s"] = _resolve_vllm_timeout(options)
     if not config.get("base_url"):
         missing.append("VLLM_BASE_URL")
     if not config.get("model"):
@@ -476,6 +611,8 @@ def run_rlm(
     decision_rootlm: RootLMClient = MockRootLM()
     decision_mode = "mock"
     decision_fallback_reason: str | None = None
+    decision_timeout = _resolve_vllm_timeout(options)
+    decision_tokens = _resolve_decision_tokens(options)
     if decision_backend == "vllm":
         config, decision_fallback_reason = _resolve_decision_vllm_config(options)
         if config:
@@ -484,12 +621,14 @@ def run_rlm(
                     base_url=config["base_url"],
                     api_key=config["api_key"],
                     model=config["model"],
-                    max_tokens=config["max_tokens"],
-                    temperature=config["temperature"],
+                    max_tokens=decision_tokens,
+                    temperature=0,
+                    stop=["\n\n", "```", "<END>"],
+                    timeout_s=decision_timeout,
                 )
                 decision_mode = "vllm"
             except Exception as exc:
-                decision_fallback_reason = f"vllm_init_failed: {exc}"
+                decision_fallback_reason = f"vllm_init_failed: {exc.__class__.__name__}: {exc}"
                 decision_rootlm = MockRootLM()
                 decision_mode = "mock"
 
@@ -657,7 +796,7 @@ def run_rlm(
             try:
                 final_result = decision_rootlm.generate_final(index, evidence, subcalls, options)
             except Exception as exc:
-                decision_fallback_reason = f"vllm_request_failed: {exc}"
+                decision_fallback_reason = f"vllm_request_failed: {exc.__class__.__name__}: {exc}"
                 decision_mode = "mock"
                 decision_rootlm = MockRootLM()
         if final_result is None:
